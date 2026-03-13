@@ -1,14 +1,35 @@
 {
   "name": "openclawweb",
   "version": "0.1.0",
+  "description": "OpenClawWeb monorepo with separated web SaaS and desktop packaging apps.",
+  "author": "SYNUSON",
+  "main": "apps/desktop/.electron-build/electron/main.js",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "dev": "npm run dev:web",
+    "dev:web": "next dev ./apps/web --hostname 127.0.0.1 --port 3000",
+    "dev:desktop": "next dev ./apps/desktop --hostname 127.0.0.1 --port 3001",
+    "build": "npm run build:web",
+    "build:web": "next build ./apps/web",
+    "build:desktop": "next build ./apps/desktop",
+    "build:all": "npm run build:web && npm run build:desktop",
+    "start": "npm run start:web",
+    "start:web": "next start ./apps/web --hostname 127.0.0.1 --port 3000",
+    "start:desktop": "next start ./apps/desktop --hostname 127.0.0.1 --port 3001",
+    "typecheck": "npm run typecheck:web",
+    "typecheck:web": "tsc --noEmit -p apps/web/tsconfig.json",
+    "typecheck:desktop": "tsc --noEmit -p apps/desktop/tsconfig.json",
+    "typecheck:all": "npm run typecheck:web && npm run typecheck:desktop",
+    "electron:tsc": "tsc -p apps/desktop/tsconfig.electron.json",
+    "electron:tsc:watch": "tsc -p apps/desktop/tsconfig.electron.json --watch --preserveWatchOutput",
+    "electron:dev": "concurrently \"npm run electron:tsc:watch\" \"wait-on apps/desktop/.electron-build/electron/main.js && electron .\"",
+    "electron:build": "npm run electron:tsc && npm run build:desktop && electron-builder",
+    "prisma:generate": "prisma generate --schema apps/desktop/prisma/schema.prisma"
   },
   "dependencies": {
+    "@prisma/client": "^7.5.0",
+    "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.3",
     "next": "^14.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
@@ -18,8 +39,13 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.4.49",
+    "prisma": "^7.5.0",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wait-on": "^9.0.4"
   }
 }

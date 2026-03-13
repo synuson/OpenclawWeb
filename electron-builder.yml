@@ -1,0 +1,29 @@
+appId: com.synuson.openclawweb
+productName: OpenclawWeb
+directories:
+  output: apps/desktop/dist-electron
+files:
+  - package.json
+  - apps/desktop/.electron-build/**
+  - apps/desktop/.next/standalone/**
+  - apps/desktop/.next/static/**
+  - apps/desktop/app/icon.svg
+  - apps/desktop/prisma/**
+asar: true
+asarUnpack:
+  - apps/desktop/.next/standalone/**
+extraResources:
+  - from: apps/desktop/openclaw-backend/dist
+    to: openclaw-backend
+    filter:
+      - "**/*"
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
