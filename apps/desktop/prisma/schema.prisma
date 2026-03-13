@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MeetingSession {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  title     String
+  minutes   String
+  turns     String
+}
+
+model Portfolio {
+  id        String   @id @default(cuid())
+  positions String
+  cash      Float
+  updatedAt DateTime @updatedAt
+}
+
+model TradeOrder {
+  id        String   @id @default(cuid())
+  symbol    String
+  side      String
+  qty       Int
+  status    String
+  fillPrice Float?
+  createdAt DateTime @default(now())
+}

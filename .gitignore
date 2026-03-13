@@ -1,6 +1,15 @@
-.next
 node_modules
 .env.local
 *.log
 dist
+.next
+.electron-build
+dist-electron
+apps/*/.next
+apps/*/.electron-build
+apps/desktop/dist-electron
+apps/desktop/openclaw-backend/dist/*
+!apps/desktop/openclaw-backend/dist/README.md
+apps/desktop/openclaw-backend/__pycache__
+apps/desktop/openclaw-backend/*.spec
 tsconfig.tsbuildinfo
