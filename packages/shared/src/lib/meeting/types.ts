@@ -2,6 +2,18 @@ import type { AppLocale } from "@/lib/i18n/config";
 
 export type AgentId = "assistant" | "analyst";
 
+export type AgentAvatarVariant = "aurora" | "graphite" | "sunset" | "lagoon";
+export type AgentAvatarPreset = "core" | "orbit" | "signal" | "grid";
+
+export type AgentPersonaConfig = {
+  displayName: string;
+  toneStyle: string;
+  avatarVariant: AgentAvatarVariant;
+  avatarPreset: AgentAvatarPreset;
+};
+
+export type AgentPersonaOverrides = Partial<Record<AgentId, Partial<AgentPersonaConfig>>>;
+
 export type Provider = "cerebras" | "anthropic" | "openai" | "mock";
 
 export type WorkspaceTab = "btc" | "kr" | "us" | "trading";
@@ -192,12 +204,35 @@ export type MeetingRoundRequest = {
   portfolioSnapshot?: PortfolioSnapshot | null;
   minutes?: MeetingMinutes | null;
   locale?: AppLocale;
+  personaOverrides?: AgentPersonaOverrides;
+};
+
+export type MeetingRoundStopReason =
+  | "conversation_complete"
+  | "research_complete"
+  | "research_failed"
+  | "clarification_needed";
+
+export type MeetingRoundMeta = {
+  firstSpeakerId: AgentId;
+  finalSpeakerId: AgentId;
+  usedResearch: boolean;
+  researchAgentId?: AgentId;
+  researchStatus?: MeetingTaskStatus;
+  stopReason: MeetingRoundStopReason;
+};
+
+export type MeetingRoundResearch = {
+  task: MeetingTask;
+  artifacts: MeetingTaskArtifacts;
 };
 
 export type MeetingRoundResponse = {
   turns: MeetingTurn[];
   minutes: MeetingMinutes;
   provider: Provider;
+  meta: MeetingRoundMeta;
+  research?: MeetingRoundResearch;
   actions?: MeetingAction[];
 };
 

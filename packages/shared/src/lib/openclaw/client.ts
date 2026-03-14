@@ -11,6 +11,11 @@ type StartMeetingTaskArgs = {
   locale?: AppLocale;
 };
 
+type RunMeetingResearchOptions = {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+};
+
 type RemoteTaskPayload = {
   id?: string;
   taskId?: string;
@@ -223,6 +228,10 @@ function escapeXml(value: string) {
 
 function truncate(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildScreenshot(task: MeetingTask) {
@@ -448,5 +457,65 @@ export async function getMeetingTaskArtifacts(taskId: string): Promise<MeetingTa
     taskId: task.taskId,
     screenshot: task.screenshot,
     notes: task.logs.map((log) => log.message)
+  };
+}
+
+export async function runMeetingResearchTask(
+  args: StartMeetingTaskArgs,
+  options: RunMeetingResearchOptions = {}
+): Promise<{ task: MeetingTask; artifacts: MeetingTaskArtifacts }> {
+  const locale = args.locale ?? DEFAULT_LOCALE;
+  const copy = OPENCLAW_COPY[locale];
+  const pollIntervalMs = options.pollIntervalMs ?? 900;
+  const timeoutMs = options.timeoutMs ?? 20_000;
+
+  const startedTask = await startMeetingTask(args);
+  let latestTask = startedTask;
+  const startedAt = Date.now();
+
+  while (latestTask.status === "queued" || latestTask.status === "running") {
+    if (Date.now() - startedAt >= timeoutMs) {
+      latestTask = {
+        ...latestTask,
+        status: "failed",
+        summary: copy.failSummary,
+        logs: [
+          ...latestTask.logs,
+          {
+            id: uid("log"),
+            ts: new Date().toISOString(),
+            level: "warning",
+            message: copy.failLog
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      };
+      break;
+    }
+
+    await sleep(pollIntervalMs);
+    const nextTask = await getMeetingTask(startedTask.taskId);
+    if (!nextTask) {
+      latestTask = {
+        ...latestTask,
+        status: "failed",
+        summary: copy.failSummary,
+        updatedAt: new Date().toISOString()
+      };
+      break;
+    }
+    latestTask = nextTask;
+  }
+
+  const artifacts =
+    (await getMeetingTaskArtifacts(startedTask.taskId)) ?? {
+      taskId: latestTask.taskId,
+      screenshot: latestTask.screenshot,
+      notes: latestTask.logs.map((log) => log.message)
+    };
+
+  return {
+    task: latestTask,
+    artifacts
   };
 }

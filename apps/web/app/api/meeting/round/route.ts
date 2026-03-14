@@ -21,7 +21,8 @@ export async function POST(request: Request) {
         marketSnapshot: body.marketSnapshot ?? null,
         portfolioSnapshot: body.portfolioSnapshot ?? null,
         minutes: body.minutes ?? null,
-        locale: resolveAppLocale(body.locale)
+        locale: resolveAppLocale(body.locale),
+        personaOverrides: body.personaOverrides
       })
     );
   } catch (error) {

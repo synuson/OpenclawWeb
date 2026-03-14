@@ -135,6 +135,18 @@ artifact 응답은 아래 두 형태를 모두 허용합니다.
 }
 ```
 
+### 에이전트 내재화형 조사 모드
+
+`POST /api/meeting/round`는 필요 시 OpenClaw를 자동으로 호출할 수 있습니다. 이때 메인 채팅에는 `OpenClaw` 로그를 직접 뿌리지 않고, `서윤` 또는 `이안`이 조사 결과를 자기 이름으로 정리해서 답합니다.
+
+직접 OpenClaw를 붙일 때 권장 기준:
+
+- `POST /tasks`는 가능한 한 짧은 시간 안에 `taskId`, `status`, `summary`를 반환
+- `GET /tasks/:id`는 `queued/running/succeeded/failed` 중 하나를 안정적으로 반환
+- `GET /tasks/:id/artifacts`는 `notes[]`를 항상 주고, 가능하면 `screenshot`도 함께 제공
+- 메인 답변은 에이전트가 다시 서술하므로, artifact의 `notes[]`는 짧고 사실 중심으로 유지
+- 타임아웃이나 실패가 나더라도 회의 라운드 자체는 끝나야 하므로, 실패 시에도 최소한의 `summary`를 반환하는 편이 좋음
+
 ## 주요 라우트
 
 - `POST /api/meeting/round`
