@@ -24,7 +24,9 @@
     "electron:tsc:watch": "tsc -p apps/desktop/tsconfig.electron.json --watch --preserveWatchOutput",
     "electron:dev": "concurrently \"npm run electron:tsc:watch\" \"wait-on apps/desktop/.electron-build/electron/main.js && electron .\"",
     "electron:build": "npm run electron:tsc && npm run build:desktop && electron-builder",
-    "prisma:generate": "prisma generate --schema apps/desktop/prisma/schema.prisma"
+    "prisma:generate": "prisma generate --schema apps/desktop/prisma/schema.prisma",
+    "setup:web": "powershell -ExecutionPolicy Bypass -File scripts/setup-web.ps1",
+    "setup:openclaw-backend": "powershell -ExecutionPolicy Bypass -File scripts/setup-openclaw-backend.ps1"
   },
   "dependencies": {
     "@prisma/client": "^7.5.0",
