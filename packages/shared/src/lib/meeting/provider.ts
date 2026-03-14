@@ -1,20 +1,93 @@
 import { AGENTS_BY_ID } from "@/lib/meeting/agents";
-import type { ChatHistoryItem, MeetingAction, Provider } from "@/lib/meeting/types";
+import { getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
+import {
+  callOpenClawMeetingChat,
+  type OpenClawMeetingChatResult
+} from "@/lib/openclaw/client";
+import type { ChatHistoryItem, MeetingAction, Provider, RoundPhase } from "@/lib/meeting/types";
 
-export function pickProvider(): Provider {
-  const forced = (process.env.MEETING_LLM_PROVIDER ?? "").toLowerCase();
-  if (forced === "cerebras" || forced === "anthropic" || forced === "openai" || forced === "mock") {
+const ANALYST_SECTIONS = getRoleDefinitionForAgent("analyst").outputFormat.sections;
+const FACILITATOR_SECTIONS = getRoleDefinitionForAgent("assistant").outputFormat.sections;
+const BROWSER_INTENT_REGEX =
+  /(browse|browser|openclaw|web|internet|search|look up|find|research|price target|filing|news|investigate|\ucc28\ud2b8|\ub274\uc2a4|\uac80\uc0c9|\ube0c\ub77c\uc6b0\uc800|\uc870\uc0ac)/i;
+const URL_REGEX = /https?:\/\/[^\s)]+/i;
+const DIRECT_PROVIDER_ORDER: Array<Exclude<Provider, "openclaw" | "mock">> = ["openai", "anthropic", "cerebras"];
+const APP_SNAPSHOT_LABEL = "\uc571 \uc2a4\ub0c5\uc0f7";
+const EMPTY_CONTENT_LINE = "- \ub0b4\uc6a9 \uc5c6\uc74c";
+
+export type CallLLMArgs = {
+  agentId: string;
+  phase?: RoundPhase;
+  agentSystemPrompt: string;
+  message: string;
+  history: ChatHistoryItem[];
+  requiredSections?: string[];
+};
+
+export type CallLLMResult = {
+  text: string;
+  provider: Provider;
+  model?: string;
+  citations?: OpenClawMeetingChatResult["citations"];
+};
+
+function getForcedProvider(): Provider | undefined {
+  const forced = (process.env.MEETING_LLM_PROVIDER ?? "").trim().toLowerCase();
+  if (forced === "openclaw" || forced === "openai" || forced === "anthropic" || forced === "cerebras" || forced === "mock") {
     return forced;
   }
+  return undefined;
+}
 
-  if (process.env.CEREBRAS_API_KEY) {
-    return "cerebras";
+function hasProviderCredentials(provider: Exclude<Provider, "openclaw" | "mock">) {
+  if (provider === "openai") {
+    return Boolean(process.env.OPENAI_API_KEY);
+  }
+  if (provider === "anthropic") {
+    return Boolean(process.env.ANTHROPIC_API_KEY);
+  }
+  return Boolean(process.env.CEREBRAS_API_KEY);
+}
+
+function dedupeProviders(providers: Provider[]) {
+  return providers.filter((provider, index) => providers.indexOf(provider) === index);
+}
+
+function buildProviderChain(initialProvider: Provider): Provider[] {
+  const forcedProvider = getForcedProvider();
+
+  if (forcedProvider === "mock") {
+    return ["mock"];
+  }
+
+  if (forcedProvider && forcedProvider !== "openclaw") {
+    return dedupeProviders([forcedProvider, "mock"]);
+  }
+
+  if (forcedProvider === "openclaw" || initialProvider === "openclaw") {
+    return dedupeProviders(["openclaw", ...DIRECT_PROVIDER_ORDER.filter(hasProviderCredentials), "mock"]);
+  }
+
+  return dedupeProviders([initialProvider, ...DIRECT_PROVIDER_ORDER.filter(hasProviderCredentials), "mock"]);
+}
+
+export function pickProvider(): Provider {
+  const forcedProvider = getForcedProvider();
+  if (forcedProvider) {
+    return forcedProvider;
+  }
+
+  if (process.env.OPENCLAW_BASE_URL) {
+    return "openclaw";
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return "openai";
   }
   if (process.env.ANTHROPIC_API_KEY) {
     return "anthropic";
   }
-  if (process.env.OPENAI_API_KEY) {
-    return "openai";
+  if (process.env.CEREBRAS_API_KEY) {
+    return "cerebras";
   }
 
   return "mock";
@@ -36,18 +109,14 @@ export async function getAgentContext(agentId: string) {
     timeStyle: "medium"
   }).format(new Date());
 
-  return `현재 시각(Asia/Seoul): ${currentTime}\n응답 에이전트: ${AGENTS_BY_ID[agentId as keyof typeof AGENTS_BY_ID]?.name ?? agentId}`;
+  return `Current time (Asia/Seoul): ${currentTime}\nResponding agent: ${AGENTS_BY_ID[agentId as keyof typeof AGENTS_BY_ID]?.name ?? agentId}`;
 }
 
 export function detectBrowserActions(message: string): MeetingAction[] {
   const trimmed = stripMentions(message).trim();
-  const urlMatch = message.match(/https?:\/\/[^\s)]+/i);
+  const urlMatch = message.match(URL_REGEX);
   const url = urlMatch?.[0];
-  const hasIntent =
-    Boolean(url) ||
-    /(browse|browser|openclaw|web|internet|search|look up|find|research|price target|filing|news|investigate|차트|뉴스|검색|웹|브라우저|조사)/i.test(
-      message
-    );
+  const hasIntent = Boolean(url) || BROWSER_INTENT_REGEX.test(message);
 
   if (!hasIntent || !trimmed) {
     return [];
@@ -62,24 +131,21 @@ export function detectBrowserActions(message: string): MeetingAction[] {
   ];
 }
 
-export async function callLLM(
-  provider: Provider,
-  args: {
-    agentSystemPrompt: string;
-    message: string;
-    history: ChatHistoryItem[];
+export async function callLLM(provider: Provider, args: CallLLMArgs): Promise<CallLLMResult> {
+  let lastError: Error | undefined;
+
+  for (const candidate of buildProviderChain(provider)) {
+    try {
+      return await callProviderWithValidation(candidate, args);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown provider error");
+      if (candidate === "mock") {
+        throw lastError;
+      }
+    }
   }
-): Promise<string> {
-  if (provider === "mock") {
-    return callMock(args);
-  }
-  if (provider === "cerebras") {
-    return callCerebras(args);
-  }
-  if (provider === "anthropic") {
-    return callAnthropic(args);
-  }
-  return callOpenAI(args);
+
+  throw lastError ?? new Error("No meeting provider could generate a response.");
 }
 
 function stripMentions(input: string) {
@@ -89,14 +155,114 @@ function stripMentions(input: string) {
 function formatSections(sections: Array<[string, string[]]>) {
   return sections
     .map(([title, lines]) => {
-      const body = lines.length > 0 ? lines.join("\n") : "- 내용 없음";
+      const body = lines.length > 0 ? lines.join("\n") : EMPTY_CONTENT_LINE;
       return `## ${title}\n${body}`;
     })
     .join("\n\n");
 }
 
+function normalizeHeading(value: string) {
+  return value
+    .replace(/^#+\s*/, "")
+    .replace(/^[-*]\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/:$/, "")
+    .trim();
+}
+
+function hasRequiredSections(text: string, requiredSections?: string[]) {
+  if (!requiredSections || requiredSections.length === 0) {
+    return true;
+  }
+
+  const headings = new Set(
+    text
+      .split(/\r?\n/)
+      .map((line) => normalizeHeading(line))
+      .filter(Boolean)
+  );
+
+  return requiredSections.every((section) => headings.has(section));
+}
+
+function buildStructuredRetryMessage(message: string, requiredSections: string[]) {
+  return [
+    message,
+    "",
+    "Reply again using the exact section titles below in the same order.",
+    ...requiredSections.map((section) => `- ${section}`),
+    "",
+    "Keep the response in Korean Markdown and do not rename the headings."
+  ].join("\n");
+}
+
+async function callProviderWithValidation(provider: Provider, args: CallLLMArgs): Promise<CallLLMResult> {
+  const initial = await callSingleProvider(provider, args);
+  if (hasRequiredSections(initial.text, args.requiredSections)) {
+    return initial;
+  }
+
+  if (!args.requiredSections || args.requiredSections.length === 0 || provider === "mock") {
+    throw new Error(`${provider} response did not satisfy the required meeting sections.`);
+  }
+
+  const retry = await callSingleProvider(provider, {
+    ...args,
+    message: buildStructuredRetryMessage(args.message, args.requiredSections)
+  });
+
+  if (hasRequiredSections(retry.text, args.requiredSections)) {
+    return retry;
+  }
+
+  throw new Error(`${provider} response is missing required meeting sections.`);
+}
+
+async function callSingleProvider(provider: Provider, args: CallLLMArgs): Promise<CallLLMResult> {
+  if (provider === "mock") {
+    return {
+      provider,
+      text: callMock(args)
+    };
+  }
+  if (provider === "openclaw") {
+    const result = await callOpenClawMeetingChat({
+      agentId: args.agentId,
+      phase: args.phase,
+      systemPrompt: args.agentSystemPrompt,
+      message: args.message,
+      history: args.history,
+      mode: "meeting"
+    });
+
+    return {
+      provider,
+      text: result.text,
+      model: result.model,
+      citations: result.citations
+    };
+  }
+  if (provider === "cerebras") {
+    return {
+      provider,
+      text: await callCerebras(args)
+    };
+  }
+  if (provider === "anthropic") {
+    return {
+      provider,
+      text: await callAnthropic(args)
+    };
+  }
+
+  return {
+    provider,
+    text: await callOpenAI(args)
+  };
+}
+
 function extractSourceLines(agentSystemPrompt: string) {
-  const sources = ["앱 스냅샷"];
+  const sources = [APP_SNAPSHOT_LABEL];
   for (const candidate of ["Upbit", "Twelve Data", "Kiwoom", "OpenClaw Demo Trading", "Kiwoom REST"]) {
     if (agentSystemPrompt.includes(candidate) && !sources.includes(candidate)) {
       sources.push(candidate);
@@ -108,97 +274,54 @@ function extractSourceLines(agentSystemPrompt: string) {
 function buildAnalystMockReply(message: string, agentSystemPrompt: string) {
   const lowerMessage = message.toLowerCase();
   const focus =
-    /btc|bitcoin|비트코인/.test(lowerMessage)
-      ? "비트코인 수급과 변동성"
-      : /kospi|kosdaq|samsung|005930|kr|국내/.test(lowerMessage)
-        ? "국내 증시 수급과 대형주 흐름"
-        : /nasdaq|s&p|qqq|aapl|nvda|us|미국/.test(lowerMessage)
-          ? "미국 지수와 AI 대형주 순환"
-          : "자산군 전반의 리스크와 포지셔닝";
+    /btc|bitcoin|\ube44\ud2b8\ucf54\uc778/.test(lowerMessage)
+      ? "\ube44\ud2b8\ucf54\uc778 \uc218\uae09\uacfc \ubcc0\ub3d9\uc131"
+      : /kospi|kosdaq|samsung|005930|kr|\uad6d\ub0b4/.test(lowerMessage)
+        ? "\uad6d\ub0b4 \uc99d\uc2dc \uc218\uae09\uacfc \ub300\ud615\uc8fc \ud750\ub984"
+        : /nasdaq|s&p|qqq|aapl|nvda|us|\ubbf8\uad6d/.test(lowerMessage)
+          ? "\ubbf8\uad6d \uc9c0\uc218\uc640 AI \ub300\ud615\uc8fc \uc21c\ud658"
+          : "\uc2dc\uc7a5 \uc804\ubc18\uacfc \ud3ec\uc9c0\uc158 \ub9ac\uc2a4\ud06c";
 
   return formatSections([
-    [
-      "핵심 수치 요약",
-      [
-        `- 현재 핵심 포인트: ${focus}`,
-        "- 스냅샷 기준으로 추세는 유지되지만 단기 과열 여부를 재확인할 필요가 있습니다.",
-        "- 의사결정 임계값은 직전 고점/저점 이탈 여부와 거래대금 유지 여부입니다."
-      ]
-    ],
-    [
-      "리스크 맵(영향도×발생확률)",
-      [
-        "- 리스크: 변동성 재확대 | 영향도: high | 발생확률: medium | 근거: 단기 가격 반응이 빠르고 추격 매수 유입 가능성이 큼 | 대응: 포지션 크기 축소 후 재확인",
-        "- 리스크: 뉴스 공백 구간 오판 | 영향도: medium | 발생확률: medium | 근거: 가격 신호만으로 판단 시 해석 오류 가능 | 대응: 뉴스와 수급을 함께 확인"
-      ]
-    ],
-    ["근거 데이터 출처", extractSourceLines(agentSystemPrompt)],
-    [
-      "시나리오별 전망",
-      [
-        "- 베이스: 현재 추세 유지, 다만 눌림 확인 전까지 추격은 제한",
-        "- 낙관: 거래대금과 모멘텀이 동반 유지되면 추가 상승 여지 확대",
-        "- 비관: 지지선 이탈과 뉴스 악화가 겹치면 단기 방어 전환 필요"
-      ]
-    ],
-    [
-      "권고안",
-      ["- 신규 판단은 소규모로 시작하고, 다음 확인 시점까지 리스크 한도를 먼저 정하세요."]
-    ]
+    [ANALYST_SECTIONS[0], [`- \ud604\uc7ac \ud575\uc2ec \ud655\uc778 \ub300\uc0c1\uc740 ${focus}\uc785\ub2c8\ub2e4.`, `- \uc9c1\uc804 \ud750\ub984\uc740 \uc720\uc9c0\ub418\uace0 \uc788\uc9c0\ub9cc \ucd94\uaca9 \uc9c4\uc785 \uc5ec\ubd80\ub294 \uac70\ub798\ub300\uae08\uacfc \uc9c0\uc9c0 \uad6c\uac04\uc744 \ud568\uaed8 \ubd10\uc57c \ud569\ub2c8\ub2e4.`]],
+    [ANALYST_SECTIONS[1], [`- \ub9ac\uc2a4\ud06c: \ub2e8\uae30 \uacfc\uc5f4 \ud6c4 \ubcc0\ub3d9\uc131 \ud655\ub300 | \uc601\ud5a5\ub3c4: high | \ubc1c\uc0dd\ud655\ub960: medium | \uadfc\uac70: \uac00\uaca9 \ubc18\uc751\uc774 \ube60\ub974\uace0 \ucd94\uaca9 \ub9e4\uc218 \uc720\uc785 \uac00\ub2a5\uc131\uc774 \ud07d\ub2c8\ub2e4. | \ub300\uc751: \ucd94\uaca9 \ube44\uc911\uc744 \uc904\uc774\uace0 \uc190\uc808 \uae30\uc900\uc744 \uba3c\uc800 \uc815\ud569\ub2c8\ub2e4.`]],
+    [ANALYST_SECTIONS[2], extractSourceLines(agentSystemPrompt)],
+    [ANALYST_SECTIONS[3], ["- \ubca0\uc774\uc2a4: \ud604\uc7ac \ucd94\uc138\ub294 \uc720\uc9c0\ub418\uc9c0\ub9cc \ud655\uc778 \uc804\uae4c\uc9c0\ub294 \ubcf4\uc218\uc801\uc73c\ub85c \uc811\uadfc\ud569\ub2c8\ub2e4.", "- \ube44\uad00: \uc9c0\uc9c0\uc120 \uc774\ud0c8\uacfc \ub274\uc2a4 \uc545\ud654\uac00 \uacb9\uce58\uba74 \ub2e8\uae30 \ubc29\uc5b4 \uc804\ud658\uc774 \ud544\uc694\ud569\ub2c8\ub2e4."]],
+    [ANALYST_SECTIONS[4], ["- \uc2e0\uaddc \uc9c4\uc785\uc740 \ubd84\ud560 \uae30\uc900\uc73c\ub85c \uc2dc\uc791\ud558\uace0, \ub2e4\uc74c \ud655\uc778 \uc2dc\uc810\uae4c\uc9c0 \uc190\uc2e4 \ud55c\ub3c4\ub97c \uba3c\uc800 \uc815\ud558\ub294 \uc811\uadfc\uc774 \uc801\uc808\ud569\ub2c8\ub2e4."]]
   ]);
 }
 
 function buildFacilitatorMockReply(message: string, agentSystemPrompt: string) {
   const lowerMessage = message.toLowerCase();
-  const hasOrderIntent = /(buy|sell|order|매수|매도|주문)/.test(lowerMessage);
-  const hasResearchIntent = /(browse|browser|openclaw|web|research|뉴스|검색|조사)/.test(lowerMessage);
+  const hasOrderIntent = /(buy|sell|order|\ub9e4\uc218|\ub9e4\ub3c4|\uc8fc\ubb38)/.test(lowerMessage);
+  const hasResearchIntent = BROWSER_INTENT_REGEX.test(lowerMessage);
   const actionTask = hasOrderIntent
-    ? "모의투자 패널에서 주문 가정을 검증한다"
+    ? "\ubaa8\uc758\ud22c\uc790 \ud654\uba74\uc5d0\uc11c \uc8fc\ubb38 \uac00\uc815\uacfc \ub9ac\uc2a4\ud06c \ud55c\ub3c4\ub97c \uac80\uc99d\ud55c\ub2e4"
     : hasResearchIntent
-      ? "OpenClaw 후속 조사 범위를 확정한다"
-      : "다음 확인 시점과 판단 기준을 확정한다";
-
-  const actionOwner = hasOrderIntent ? "이안" : "서윤";
+      ? "OpenClaw \uc870\uc0ac \ubc94\uc704\ub97c \ud655\uc815\ud558\uace0 \ud544\uc694\ud55c URL\uc744 \uc815\ub9ac\ud55c\ub2e4"
+      : "\ub2e4\uc74c \ud655\uc778 \uc2dc\uc810\uacfc \ud310\ub2e8 \uae30\uc900\uc744 \ud655\uc815\ud55c\ub2e4";
+  const actionOwner = hasOrderIntent ? "\uc774\uc548" : "\uc11c\uc724";
+  const sourceLine = agentSystemPrompt.includes("OpenClaw")
+    ? "- \ucd94\uac00 \uc870\uc0ac\uac00 \ud544\uc694\ud558\uba74 OpenClaw \uacb0\uacfc\ub97c \uadfc\uac70\uc5d0 \ud569\uce69\ub2c8\ub2e4."
+    : "- \ud604\uc7ac \uc2a4\ub0c5\uc0f7 \uae30\uc900\uc73c\ub85c\ub3c4 \uacb0\ub860\uc744 \ub0bc \uc218 \uc788\uc2b5\ub2c8\ub2e4.";
 
   return formatSections([
-    [
-      "결론",
-      ["- 현재 정보만으로도 다음 액션을 정할 수 있지만, 실행 전 마지막 확인 절차는 유지해야 합니다."]
-    ],
-    [
-      "근거 요약",
-      [
-        "- 분석가 관점에서는 추세 활용 여지는 있으나 리스크 관리가 선행되어야 합니다.",
-        "- 출처는 앱 스냅샷 기준으로 충분하며, 필요 시 추가 웹 조사를 붙이면 됩니다."
-      ]
-    ],
-    [
-      "다음 액션(담당/기한)",
-      [`- 작업: ${actionTask} | 담당: ${actionOwner} | 기한: TBD | 상태: todo`]
-    ],
-    [
-      "미해결 이슈",
-      ["- 외부 뉴스와 실시간 호가를 어디까지 추가 검증할지 아직 확정되지 않았습니다."]
-    ],
-    [
-      "회의록 요약",
-      ["- 이번 라운드는 추세 활용 가능성을 확인했고, 실행 전 검증 절차를 남기는 것으로 정리합니다."]
-    ]
+    [FACILITATOR_SECTIONS[0], ["- \ud604\uc7ac \uc815\ubcf4\ub9cc\uc73c\ub85c\ub3c4 \ub2e4\uc74c \uc561\uc158\uc740 \uc815\ud560 \uc218 \uc788\uc9c0\ub9cc, \uc2e4\ud589 \uc804 \ub9c8\uc9c0\ub9c9 \ud655\uc778 \ud56d\ubaa9\uc740 \ub0a8\uaca8\ub450\ub294 \uac83\uc774 \uc548\uc804\ud569\ub2c8\ub2e4."]],
+    [FACILITATOR_SECTIONS[1], ["- \ubd84\uc11d\uac00 \uad00\uc810\uc5d0\uc11c\ub294 \ucd94\uc138\ub294 \uc720\ud6a8\ud558\uc9c0\ub9cc \ub9ac\uc2a4\ud06c \uad00\ub9ac\uac00 \ubc18\ub4dc\uc2dc \uc120\ud589\ub418\uc5b4\uc57c \ud569\ub2c8\ub2e4.", sourceLine]],
+    [FACILITATOR_SECTIONS[2], [`- \uc791\uc5c5: ${actionTask} | \ub2f4\ub2f9: ${actionOwner} | \uae30\ud55c: TBD | \uc0c1\ud0dc: todo`]],
+    [FACILITATOR_SECTIONS[3], ["- \ud575\uc2ec \uc9c0\uc9c0 \uad6c\uac04\uacfc \ub274\uc2a4 \uc774\ubca4\ud2b8\ub97c \uc5b4\ub290 \ubc94\uc704\uae4c\uc9c0 \ucd94\uac00 \uac80\uc99d\ud560\uc9c0 \uc544\uc9c1 \ud655\uc815\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4."]],
+    [FACILITATOR_SECTIONS[4], ["- \uc774\ubc88 \ub77c\uc6b4\ub4dc\ub294 \ucd94\uc138\uc640 \ub9ac\uc2a4\ud06c\ub97c \ud655\uc778\ud588\uace0, \uc2e4\ud589 \uc804 \uac80\uc99d \ud56d\ubaa9\uc744 \ub0a8\uae30\ub294 \ucabd\uc73c\ub85c \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4."]]
   ]);
 }
 
-function callMock(args: { agentSystemPrompt: string; message: string; history: ChatHistoryItem[] }) {
+function callMock(args: CallLLMArgs) {
   const isAnalyst = args.agentSystemPrompt.includes("[ROLE:analyst]");
   return isAnalyst
     ? buildAnalystMockReply(args.message, args.agentSystemPrompt)
     : buildFacilitatorMockReply(args.message, args.agentSystemPrompt);
 }
 
-async function callCerebras(args: {
-  agentSystemPrompt: string;
-  message: string;
-  history: ChatHistoryItem[];
-}) {
+async function callCerebras(args: CallLLMArgs) {
   const apiKey = process.env.CEREBRAS_API_KEY;
   if (!apiKey) {
     throw new Error("CEREBRAS_API_KEY is not set.");
@@ -241,11 +364,7 @@ async function callCerebras(args: {
   return data.choices?.[0]?.message?.content?.trim() || "(empty response)";
 }
 
-async function callAnthropic(args: {
-  agentSystemPrompt: string;
-  message: string;
-  history: ChatHistoryItem[];
-}) {
+async function callAnthropic(args: CallLLMArgs) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set.");
@@ -318,11 +437,7 @@ function extractOpenAIOutputText(data: unknown) {
   return "";
 }
 
-async function callOpenAI(args: {
-  agentSystemPrompt: string;
-  message: string;
-  history: ChatHistoryItem[];
-}) {
+async function callOpenAI(args: CallLLMArgs) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set.");

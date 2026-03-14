@@ -13,6 +13,17 @@ import { uid } from "@/lib/utils";
 
 const ANALYST_SECTIONS = getRoleDefinitionForAgent("analyst").outputFormat.sections;
 const FACILITATOR_SECTIONS = getRoleDefinitionForAgent("assistant").outputFormat.sections;
+const FACILITATOR_ACTION_SECTION = FACILITATOR_SECTIONS[2] ?? "";
+const FACILITATOR_SUMMARY_SECTION = FACILITATOR_SECTIONS[4] ?? "";
+const FACILITATOR_CONCLUSION_SECTION = FACILITATOR_SECTIONS[0] ?? "";
+const FACILITATOR_RATIONALE_SECTION = FACILITATOR_SECTIONS[1] ?? "";
+const ANALYST_SUMMARY_SECTION = ANALYST_SECTIONS[0] ?? "";
+const ANALYST_RECOMMENDATION_SECTION = ANALYST_SECTIONS[4] ?? "";
+const ACTION_LABEL = "\uc791\uc5c5";
+const OWNER_LABEL = "\ub2f4\ub2f9";
+const DUE_LABEL = "\uae30\ud55c";
+const STATUS_LABEL = "\uc0c1\ud0dc";
+const TBD = "TBD";
 
 type ParsedSections = Record<string, string[]>;
 
@@ -63,12 +74,12 @@ function parseSections(text: string, sectionNames: string[]) {
 
 function parseDueAt(value: string | undefined) {
   const raw = (value ?? "").trim();
-  if (!raw || raw.toUpperCase() === "TBD") {
-    return "TBD";
+  if (!raw || raw.toUpperCase() === TBD) {
+    return TBD;
   }
 
   const timestamp = Date.parse(raw);
-  return Number.isNaN(timestamp) ? "TBD" : new Date(timestamp).toISOString();
+  return Number.isNaN(timestamp) ? TBD : new Date(timestamp).toISOString();
 }
 
 function parseActionItemLine(line: string): NormalizedActionItem {
@@ -84,10 +95,10 @@ function parseActionItemLine(line: string): NormalizedActionItem {
     fields.set(label.trim(), rest.join(":").trim());
   }
 
-  const task = fields.get("작업") || cleaned || "후속 확인";
-  const owner = fields.get("담당") || "TBD";
-  const dueAt = parseDueAt(fields.get("기한"));
-  const status = fields.get("상태");
+  const task = fields.get(ACTION_LABEL) || cleaned || "\ud6c4\uc18d \ud655\uc778";
+  const owner = fields.get(OWNER_LABEL) || TBD;
+  const dueAt = parseDueAt(fields.get(DUE_LABEL));
+  const status = fields.get(STATUS_LABEL);
 
   return {
     task,
@@ -98,16 +109,16 @@ function parseActionItemLine(line: string): NormalizedActionItem {
 }
 
 function formatActionItem(item: NormalizedActionItem) {
-  return `작업: ${item.task} | 담당: ${item.owner || "TBD"} | 기한: ${item.dueAt || "TBD"} | 상태: ${item.status}`;
+  return `${ACTION_LABEL}: ${item.task} | ${OWNER_LABEL}: ${item.owner || TBD} | ${DUE_LABEL}: ${item.dueAt || TBD} | ${STATUS_LABEL}: ${item.status}`;
 }
 
 function extractActionItemsFromSections(sections: ParsedSections, userMessage: string) {
-  const lines = sections["다음 액션(담당/기한)"] ?? [];
+  const lines = sections[FACILITATOR_ACTION_SECTION] ?? [];
   if (lines.length > 0) {
     return lines.map(parseActionItemLine).map(formatActionItem);
   }
 
-  return [formatActionItem({ task: trimText(userMessage, 90), owner: "TBD", dueAt: "TBD", status: "todo" })];
+  return [formatActionItem({ task: trimText(userMessage, 90), owner: TBD, dueAt: TBD, status: "todo" })];
 }
 
 function firstSectionText(sections: ParsedSections, sectionName: string) {
@@ -116,13 +127,13 @@ function firstSectionText(sections: ParsedSections, sectionName: string) {
 
 function renderHistory(history: ChatHistoryItem[]) {
   if (history.length === 0) {
-    return "이전 회의 대화가 없습니다.";
+    return "No prior meeting conversation.";
   }
 
   return history
     .slice(-8)
     .map((item) => {
-      const speaker = item.role === "user" ? "사용자" : AGENTS_BY_ID[item.agent ?? "assistant"]?.name || "에이전트";
+      const speaker = item.role === "user" ? "User" : AGENTS_BY_ID[item.agent ?? "assistant"]?.name || "Agent";
       return `- ${speaker}: ${item.content}`;
     })
     .join("\n");
@@ -130,7 +141,7 @@ function renderHistory(history: ChatHistoryItem[]) {
 
 function renderMarketSnapshot(request: MeetingRoundRequest) {
   if (!request.marketSnapshot) {
-    return "시장 스냅샷이 제공되지 않았습니다.";
+    return "Market snapshot was not provided.";
   }
 
   const snapshot = request.marketSnapshot;
@@ -148,18 +159,18 @@ function renderMarketSnapshot(request: MeetingRoundRequest) {
     );
 
   return [
-    `활성 탭: ${snapshot.tab}`,
-    `헤드라인: ${snapshot.headline}`,
-    `데이터 제공자: ${snapshot.provider}`,
-    indexLines.length > 0 ? `지수: ${indexLines.join(", ")}` : "지수: 없음",
-    watchLines.length > 0 ? `관심종목: ${watchLines.join(", ")}` : "관심종목: 없음",
-    snapshot.notes.length > 0 ? `메모: ${snapshot.notes.join(" | ")}` : "메모: 없음"
+    `Active tab: ${snapshot.tab}`,
+    `Headline: ${snapshot.headline}`,
+    `Provider: ${snapshot.provider}`,
+    indexLines.length > 0 ? `Indices: ${indexLines.join(", ")}` : "Indices: none",
+    watchLines.length > 0 ? `Watchlist: ${watchLines.join(", ")}` : "Watchlist: none",
+    snapshot.notes.length > 0 ? `Notes: ${snapshot.notes.join(" | ")}` : "Notes: none"
   ].join("\n");
 }
 
 function renderPortfolio(snapshot?: PortfolioSnapshot | null) {
   if (!snapshot) {
-    return "포트폴리오 스냅샷이 제공되지 않았습니다.";
+    return "Portfolio snapshot was not provided.";
   }
 
   const positions =
@@ -168,33 +179,33 @@ function renderPortfolio(snapshot?: PortfolioSnapshot | null) {
           .slice(0, 5)
           .map(
             (position) =>
-              `${position.symbol} 수량 ${position.quantity}, 평균가 ${position.averagePrice.toFixed(0)}, 손익 ${position.unrealizedPnlPercent.toFixed(2)}%`
+              `${position.symbol} qty ${position.quantity}, avg ${position.averagePrice.toFixed(0)}, pnl ${position.unrealizedPnlPercent.toFixed(2)}%`
           )
           .join("; ")
-      : "보유 포지션 없음";
+      : "No open positions";
 
   return [
-    `브로커: ${snapshot.broker} (${snapshot.mode})`,
-    `예수금: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`,
-    `총자산: ${snapshot.equity.toFixed(0)} ${snapshot.currency}`,
-    `포지션: ${positions}`
+    `Broker: ${snapshot.broker} (${snapshot.mode})`,
+    `Cash: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`,
+    `Equity: ${snapshot.equity.toFixed(0)} ${snapshot.currency}`,
+    `Positions: ${positions}`
   ].join("\n");
 }
 
 function renderPriorMinutes(minutes?: MeetingMinutes | null) {
   if (!minutes) {
-    return "이전 회의록이 없습니다.";
+    return "No previous meeting minutes.";
   }
 
   return [
-    `요약: ${minutes.summary}`,
-    `액션 아이템: ${minutes.actionItems.join("; ") || "없음"}`,
-    `매매 메모: ${minutes.tradeNotes.join("; ") || "없음"}`
+    `Summary: ${minutes.summary}`,
+    `Action items: ${minutes.actionItems.join("; ") || "none"}`,
+    `Trade notes: ${minutes.tradeNotes.join("; ") || "none"}`
   ].join("\n");
 }
 
 function collectSourceLabels(request: MeetingRoundRequest) {
-  const labels = ["앱 스냅샷"];
+  const labels = ["\uc571 \uc2a4\ub0c5\uc0f7"];
 
   if (request.marketSnapshot?.provider && !labels.includes(request.marketSnapshot.provider)) {
     labels.push(request.marketSnapshot.provider);
@@ -233,26 +244,36 @@ function buildMinutes(args: {
       ? portfolio.positions
           .slice(0, 3)
           .map(
-            (position) => `${position.symbol}: ${position.quantity}주, 평가손익 ${position.unrealizedPnlPercent.toFixed(2)}%`
+            (position) => `${position.symbol}: ${position.quantity}\uc8fc \ud3c9\uade0 \uc190\uc775 ${position.unrealizedPnlPercent.toFixed(2)}%`
           )
-      : ["모의 포트폴리오에 열린 포지션이 없습니다."]
-    : ["매매 스냅샷을 불러오지 못했습니다."];
+      : ["\ubaa8\uc758 \ud3ec\ud2b8\ud3f4\ub9ac\uc624\uc5d0 \uc5f4\ub9b0 \ud3ec\uc9c0\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4."]
+    : ["\ub9e4\ub9e4 \uc2a4\ub0c5\uc0f7\uc744 \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4."];
 
   return {
     sessionId: args.sessionId,
-    title: `${new Date().toLocaleDateString("ko-KR")} 금융 회의록`,
+    title: `${new Date().toLocaleDateString("ko-KR")} \uae08\uc735 \ud68c\uc758\ub85d`,
     updatedAt: isoNow(),
     activeTab: args.request.activeTab,
     summary: trimText(
-      firstSectionText(facilitatorSections, "회의록 요약") ||
-        firstSectionText(facilitatorSections, "결론") ||
+      firstSectionText(facilitatorSections, FACILITATOR_SUMMARY_SECTION) ||
+        firstSectionText(facilitatorSections, FACILITATOR_CONCLUSION_SECTION) ||
         args.assistantText,
       240
     ),
-    marketSnapshot: marketLines.length > 0 ? marketLines : ["이번 라운드에서 저장된 시세가 없습니다."],
+    marketSnapshot: marketLines.length > 0 ? marketLines : ["\uc774\ubc88 \ub77c\uc6b4\ub4dc\uc5d0\ub294 \uc694\uc57d\ud560 \uc2dc\uc138\uac00 \uc5c6\uc2b5\ub2c8\ub2e4."],
     keyPoints: [
-      trimText(firstSectionText(analystSections, "권고안") || firstSectionText(analystSections, "핵심 수치 요약") || args.analystText, 220),
-      trimText(firstSectionText(facilitatorSections, "근거 요약") || firstSectionText(facilitatorSections, "결론") || args.assistantText, 220)
+      trimText(
+        firstSectionText(analystSections, ANALYST_RECOMMENDATION_SECTION) ||
+          firstSectionText(analystSections, ANALYST_SUMMARY_SECTION) ||
+          args.analystText,
+        220
+      ),
+      trimText(
+        firstSectionText(facilitatorSections, FACILITATOR_RATIONALE_SECTION) ||
+          firstSectionText(facilitatorSections, FACILITATOR_CONCLUSION_SECTION) ||
+          args.assistantText,
+        220
+      )
     ],
     actionItems: extractActionItemsFromSections(facilitatorSections, args.request.message),
     tradeNotes
@@ -260,25 +281,28 @@ function buildMinutes(args: {
 }
 
 export async function runMeetingRound(request: MeetingRoundRequest): Promise<MeetingRoundResponse> {
-  const provider = pickProvider();
+  const preferredProvider = pickProvider();
   const sessionId = request.minutes?.sessionId || uid("session");
   const sharedContext = [
-    "당신은 금융 회의실 안에 있습니다. 반드시 한국어로, 짧고 실무적으로 답하세요.",
+    "You are inside a financial meeting room. Respond in Korean and stay concise.",
     renderMarketSnapshot(request),
     renderPortfolio(request.portfolioSnapshot),
     renderPriorMinutes(request.minutes),
-    "근거 데이터 출처로 사용할 수 있는 후보:",
+    "Available evidence labels:",
     renderSourceHints(request),
-    "최근 대화:",
+    "Recent conversation:",
     renderHistory(request.history)
   ].join("\n\n");
 
-  const analystText = await callLLM(provider, {
+  const analystResult = await callLLM(preferredProvider, {
+    agentId: "analyst",
+    phase: "analysis",
     agentSystemPrompt: `${AGENTS_BY_ID.analyst.systemPrompt}\n\n${sharedContext}`,
     history: request.history,
+    requiredSections: ANALYST_SECTIONS,
     message: [
-      `사용자 요청:\n${request.message}`,
-      "아래 섹션 제목을 그대로 사용하세요:",
+      `User request:\n${request.message}`,
+      "Use the exact section titles below.",
       ANALYST_SECTIONS.map((section) => `- ${section}`).join("\n")
     ].join("\n\n")
   });
@@ -287,9 +311,9 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
     id: uid("turn"),
     agentId: "analyst",
     speakerLabel: AGENTS_BY_ID.analyst.name,
-    text: analystText,
+    text: analystResult.text,
     timestamp: isoNow(),
-    provider,
+    provider: analystResult.provider,
     phase: "analysis"
   };
 
@@ -298,33 +322,42 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
     {
       role: "assistant",
       agent: "analyst",
-      content: analystText
+      content: analystResult.text
     }
   ];
 
-  let assistantText = await callLLM(provider, {
+  let assistantResult = await callLLM(preferredProvider, {
+    agentId: "assistant",
+    phase: "summary",
     agentSystemPrompt: `${AGENTS_BY_ID.assistant.systemPrompt}\n\n${sharedContext}`,
     history: assistantHistory,
+    requiredSections: FACILITATOR_SECTIONS,
     message: [
-      `사용자 요청:\n${request.message}`,
-      `분석가 메모:\n${analystText}`,
-      "아래 섹션 제목을 그대로 사용하세요:",
+      `User request:\n${request.message}`,
+      `Analyst note:\n${analystResult.text}`,
+      "Use the exact section titles below.",
       FACILITATOR_SECTIONS.map((section) => `- ${section}`).join("\n")
     ].join("\n\n")
   });
 
-  const actions = detectBrowserActions(request.message);
-  if (actions.length > 0 && !/openclaw|browser|research|browse|조사|웹/i.test(assistantText)) {
-    assistantText = `${assistantText}\n\n## 미해결 이슈\n- 추가 웹 조사가 필요하면 OpenClaw 후속 조사를 실행하세요.`;
+  const usedOpenClawProvider = analystResult.provider === "openclaw" || assistantResult.provider === "openclaw";
+  const actions = usedOpenClawProvider ? [] : detectBrowserActions(request.message);
+  const needsResearchHint = actions.length > 0 && !/(OpenClaw|research|browse|web)/i.test(assistantResult.text);
+
+  if (needsResearchHint) {
+    assistantResult = {
+      ...assistantResult,
+      text: `${assistantResult.text}\n\n## ${FACILITATOR_SECTIONS[3]}\n- \ucd94\uac00 \uc6f9 \uc870\uc0ac\uac00 \ud544\uc694\ud558\uba74 OpenClaw \uc870\uc0ac \ud328\ub110\uc5d0\uc11c \ud6c4\uc18d \ud655\uc778\uc744 \uc9c4\ud589\ud558\uc138\uc694.`
+    };
   }
 
   const assistantTurn: MeetingTurn = {
     id: uid("turn"),
     agentId: "assistant",
     speakerLabel: AGENTS_BY_ID.assistant.name,
-    text: assistantText,
+    text: assistantResult.text,
     timestamp: isoNow(),
-    provider,
+    provider: assistantResult.provider,
     phase: "summary"
   };
 
@@ -332,11 +365,11 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
     turns: [analystTurn, assistantTurn],
     minutes: buildMinutes({
       request,
-      analystText,
-      assistantText,
+      analystText: analystResult.text,
+      assistantText: assistantResult.text,
       sessionId
     }),
-    provider,
+    provider: assistantResult.provider,
     actions
   };
 }

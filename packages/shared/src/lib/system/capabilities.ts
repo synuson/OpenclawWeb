@@ -1,4 +1,5 @@
-﻿import type { Capabilities } from "@/lib/meeting/types";
+import type { Capabilities } from "@/lib/meeting/types";
+import { isOpenClawChatConfigured, isOpenClawRemoteConfigured } from "@/lib/openclaw/client";
 
 export function getKiwoomProxyConfig() {
   const baseUrl = process.env.KIWOOM_PROXY_BASE_URL?.replace(/\/$/, "") || "";
@@ -21,6 +22,7 @@ export function getCapabilities(): Capabilities {
     kiwoomRest: Boolean(getKiwoomProxyConfig()),
     twelveData: Boolean(process.env.TWELVE_DATA_API_KEY),
     demoTrading: !Boolean(getKiwoomProxyConfig()),
-    openclawRemote: Boolean(process.env.OPENCLAW_BASE_URL)
+    openclawRemote: isOpenClawRemoteConfigured(),
+    openclawChat: isOpenClawChatConfigured()
   };
 }
