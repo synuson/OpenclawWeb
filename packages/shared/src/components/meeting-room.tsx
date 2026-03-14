@@ -440,7 +440,7 @@ function dockPanelCopy(locale: AppLocale) {
         researchStatus: "조사 상태",
         marketHubEyebrow: "금융 허브",
         marketHubDescription: "시장 선택은 왼쪽, 주요 판단은 오른쪽에 집중합니다.",
-        meetingOverviewTitle: "OpenClaw 전략 회의실"
+        meetingOverviewTitle: "Workspace"
       }
     : {
         stageNotice: "\uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uC801\uD569\uD55C AI\uAC00 \uBA3C\uC800 \uB2F5\uD558\uACE0, \uD544\uC694\uD558\uBA74 \uC870\uC0AC\uAE4C\uC9C0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4.",
@@ -484,7 +484,7 @@ function dockPanelCopy(locale: AppLocale) {
         researchStatus: "Research status",
         marketHubEyebrow: "Finance hub",
         marketHubDescription: "Keep market selection on the left and decisions on the right.",
-        meetingOverviewTitle: "OpenClaw strategy room"
+        meetingOverviewTitle: "Workspace"
       };
 }
 
@@ -2110,8 +2110,8 @@ export function MeetingRoom({
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
-  const [personaOverrides, setPersonaOverrides] = useState<AgentPersonaOverrides>(() => readStoredPersonas(locale));
-  const [dockOpen, setDockOpen] = useState(true);
+  const [personaOverrides, setPersonaOverrides] = useState<AgentPersonaOverrides>(() => buildPersonaState(locale));
+  const [dockOpen, setDockOpen] = useState(false);
   const [activeDockTab, setActiveDockTab] = useState<DockTab>("session");
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
@@ -2158,6 +2158,7 @@ export function MeetingRoom({
   const speechRunRef = useRef(0);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const personaHydratedRef = useRef(false);
 
   const agents = useMemo(() => getAgents(locale, personaOverrides), [locale, personaOverrides]);
   const agentsById = useMemo(() => getAgentsById(locale, personaOverrides), [locale, personaOverrides]);
@@ -2200,15 +2201,24 @@ export function MeetingRoom({
           : "bg-ink/28";
   const meetingShellTitle = experienceCopy.meetingOverviewTitle;
   const selectedSnapshotDetail =
-    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" 쨌 ") ||
+    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" · ") ||
     selectedSnapshotSummary;
 
+  const availableFeatureLabels = [
+    browserSpeechSupported ? copy.meeting.browserStt : null,
+    capabilities?.openaiStt ? copy.meeting.whisper : null,
+    browserTtsSupported ? copy.meeting.browserTts : null,
+    capabilities?.elevenLabsTts ? copy.meeting.elevenLabs : null,
+    copy.meeting.openClawResearch,
+    capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw 회의" : "OpenClaw Meeting") : null
+  ].filter(Boolean) as string[];
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(MINUTES_STORAGE_KEY);
       if (stored) {
         setMinutesHistory(JSON.parse(stored) as MeetingSessionRecord[]);
       }
+      setPersonaOverrides(readStoredPersonas(locale));
       const recognitionSource = (window as Window & {
         SpeechRecognition?: new () => BrowserSpeechRecognition;
         webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
@@ -2218,10 +2228,17 @@ export function MeetingRoom({
       setBrowserTtsSupported("speechSynthesis" in window);
     } catch {
       setMinutesHistory([]);
+      setPersonaOverrides(buildPersonaState(locale));
+    } finally {
+      personaHydratedRef.current = true;
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
+    if (!personaHydratedRef.current) {
+      return;
+    }
+
     persistPersonas(personaOverrides);
   }, [personaOverrides]);
 
@@ -3036,22 +3053,17 @@ export function MeetingRoom({
                   </div>
                 ) : null}
                             <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>
-                {(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => (
-                  <p key={note} className="mb-2">
-                    {note}
-                  </p>
-                ))}
-                <p>
-                  {copy.meeting.capabilitiesLine({
-                    browserStt: browserSpeechSupported ? "브라우저" : "없음",
-                    whisper: capabilities?.openaiStt ? "준비" : "꺼짐",
-                    browserTts: browserTtsSupported ? "브라우저" : "없음",
-                    elevenLabs: capabilities?.elevenLabsTts ? "준비" : "꺼짐",
-                    openClawRemote: capabilities?.openclawRemote ? "연결됨" : "내장 mock",
-                    openClawChat: capabilities?.openclawChat ? "준비" : "꺼짐"
-                  })}
-                </p>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
+                <div className="flex flex-wrap gap-2">
+                  {availableFeatureLabels.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-full border border-ink/10 bg-white px-3 py-1.5 text-xs font-medium text-ink/80"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
               </div>              </div>
             </ScrollArea>
           </Card>
@@ -3112,6 +3124,5 @@ export function MeetingRoom({
     </div>
   );
 }
-
 
 
