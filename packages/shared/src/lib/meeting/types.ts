@@ -1,6 +1,6 @@
 ﻿export type AgentId = "assistant" | "analyst";
 
-export type Provider = "cerebras" | "anthropic" | "openai" | "mock";
+export type Provider = "openclaw" | "openai" | "anthropic" | "cerebras" | "mock";
 
 export type WorkspaceTab = "btc" | "kr" | "us" | "trading";
 
@@ -200,6 +200,7 @@ export type Capabilities = {
   twelveData: boolean;
   demoTrading: boolean;
   openclawRemote: boolean;
+  openclawChat: boolean;
 };
 
 export type MeetingTaskStatus = "queued" | "running" | "succeeded" | "failed";

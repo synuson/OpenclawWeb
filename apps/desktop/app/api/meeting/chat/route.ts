@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AGENTS_BY_ID, DEFAULT_AGENT_ID, detectMentionedAgentId } from "@/lib/meeting/agents";
+import { getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
 import { callLLM, detectBrowserActions, getAgentContext, isoNow, pickProvider } from "@/lib/meeting/provider";
 import type { MeetingChatRequest, MeetingChatResponse } from "@/lib/meeting/types";
 
@@ -27,35 +28,42 @@ export async function POST(request: Request) {
     }
 
     const agent = AGENTS_BY_ID[chosenId] ?? AGENTS_BY_ID[DEFAULT_AGENT_ID];
-    const provider = pickProvider();
-    const actions = detectBrowserActions(body.message);
+    const preferredProvider = pickProvider();
     const extraContext = await getAgentContext(agent.id);
+    const sections = getRoleDefinitionForAgent(agent.id).outputFormat.sections;
     const systemPrompt = [
       agent.systemPrompt,
-      "[미팅 규칙]",
-      "- 반드시 한국어로 답하세요.",
-      "- 결론이나 권고가 있다면 섹션 제목을 유지한 채 명확한 문장으로 쓰세요.",
-      "- 웹 조사 의도가 보이면 OpenClaw 후속 조사를 짧게 제안해도 됩니다.",
-      "- 실제 다자 음성 통화가 아니라 회의 UI 안에서 논의 중이라는 전제를 유지하세요.",
-      "[추가 컨텍스트]",
+      "[Meeting rules]",
+      "- Respond in Korean.",
+      "- Keep the exact section headings when the role definition requires them.",
+      "- You may suggest a follow-up OpenClaw research task when web verification is needed.",
+      "- Stay inside the meeting-room UI context instead of pretending to be in a live call.",
+      "[Extra context]",
       extraContext
     ].join("\n\n");
 
-    let reply = await callLLM(provider, {
+    const result = await callLLM(preferredProvider, {
+      agentId: agent.id,
+      phase: body.phase,
       agentSystemPrompt: systemPrompt,
       message: body.message,
-      history
+      history,
+      requiredSections: sections
     });
 
-    if (actions.length > 0 && !/(웹 조사|브라우저|확인|OpenClaw)/.test(reply)) {
-      reply = `${reply}\n\n추가 웹 조사가 필요하면 OpenClaw 후속 조사를 실행할 수 있습니다.`;
+    const actions = result.provider === "openclaw" ? [] : detectBrowserActions(body.message);
+    let reply = result.text;
+
+    if (actions.length > 0 && !/(OpenClaw|research|browse|web)/i.test(reply)) {
+      reply = `${reply}\n\n\ucd94\uac00 \uc6f9 \uc870\uc0ac\uac00 \ud544\uc694\ud558\uba74 OpenClaw \uc870\uc0ac \ud328\ub110\uc5d0\uc11c \ud6c4\uc18d \ud655\uc778\uc744 \uc9c4\ud589\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.`;
     }
 
     const response: MeetingChatResponse = {
       agentId: agent.id,
       message: reply,
       timestamp: isoNow(),
-      provider,
+      provider: result.provider,
+      phase: body.phase,
       actions
     };
 

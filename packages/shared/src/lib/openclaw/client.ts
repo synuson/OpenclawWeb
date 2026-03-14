@@ -1,5 +1,12 @@
 import { AGENTS_BY_ID } from "@/lib/meeting/agents";
-import type { MeetingTask, MeetingTaskArtifacts, MeetingTaskLog, MeetingTaskStatus } from "@/lib/meeting/types";
+import type {
+  ChatHistoryItem,
+  MeetingTask,
+  MeetingTaskArtifacts,
+  MeetingTaskLog,
+  MeetingTaskStatus,
+  RoundPhase
+} from "@/lib/meeting/types";
 import { uid } from "@/lib/utils";
 
 type StartMeetingTaskArgs = {
@@ -7,6 +14,25 @@ type StartMeetingTaskArgs = {
   instruction: string;
   url?: string;
   sessionId?: string;
+};
+
+export type OpenClawMeetingChatArgs = {
+  agentId: string;
+  phase?: RoundPhase;
+  systemPrompt: string;
+  message: string;
+  history: ChatHistoryItem[];
+  mode?: "meeting";
+};
+
+export type OpenClawMeetingChatResult = {
+  text: string;
+  provider?: string;
+  model?: string;
+  citations?: Array<{
+    title?: string;
+    url?: string;
+  }>;
 };
 
 type RemoteTaskPayload = {
@@ -39,7 +65,20 @@ type RemoteTaskPayload = {
   notes?: string[];
 };
 
+type RemoteChatPayload = {
+  text?: string;
+  message?: string;
+  content?: string;
+  provider?: string;
+  model?: string;
+  citations?: Array<{
+    title?: string;
+    url?: string;
+  }>;
+};
+
 const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL?.replace(/\/$/, "") || "";
+const OPENCLAW_CHAT_PATH = normalizePath(process.env.OPENCLAW_CHAT_PATH || "/chat");
 const OPENCLAW_TASKS_PATH = normalizePath(process.env.OPENCLAW_TASKS_PATH || "/tasks");
 const OPENCLAW_TASK_DETAIL_PATH = normalizePath(process.env.OPENCLAW_TASK_DETAIL_PATH || "/tasks/:id");
 const OPENCLAW_TASK_ARTIFACTS_PATH = normalizePath(
@@ -286,6 +325,48 @@ async function requestRemote<T>(path: string, init?: RequestInit) {
   }
 
   return (await response.json()) as T;
+}
+
+function normalizeChatResult(payload: RemoteChatPayload): OpenClawMeetingChatResult {
+  const text = payload.text || payload.message || payload.content || "";
+  if (!text.trim()) {
+    throw new Error("OpenClaw chat returned an empty response.");
+  }
+
+  return {
+    text: text.trim(),
+    provider: payload.provider,
+    model: payload.model,
+    citations: payload.citations
+  };
+}
+
+export function isOpenClawRemoteConfigured() {
+  return Boolean(OPENCLAW_BASE_URL);
+}
+
+export function isOpenClawChatConfigured() {
+  return Boolean(OPENCLAW_BASE_URL);
+}
+
+export async function callOpenClawMeetingChat(args: OpenClawMeetingChatArgs): Promise<OpenClawMeetingChatResult> {
+  if (!OPENCLAW_BASE_URL) {
+    throw new Error("OPENCLAW_BASE_URL is not set.");
+  }
+
+  const payload = await requestRemote<RemoteChatPayload>(OPENCLAW_CHAT_PATH, {
+    method: "POST",
+    body: JSON.stringify({
+      agentId: args.agentId,
+      phase: args.phase,
+      systemPrompt: args.systemPrompt,
+      message: args.message,
+      history: args.history,
+      mode: args.mode || "meeting"
+    })
+  });
+
+  return normalizeChatResult(payload);
 }
 
 export async function startMeetingTask(args: StartMeetingTaskArgs): Promise<MeetingTask> {

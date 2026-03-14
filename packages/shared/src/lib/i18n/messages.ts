@@ -121,8 +121,10 @@ const dictionaries = {
         whisper: string;
         browserTts: string;
         elevenLabs: string;
+        openClawRemote: string;
+        openClawChat: string;
       }) =>
-        `기능: STT ${args.browserStt}, Whisper ${args.whisper}, TTS ${args.browserTts}, ElevenLabs ${args.elevenLabs}.`,
+        `\uae30\ub2a5: STT ${args.browserStt}, Whisper ${args.whisper}, TTS ${args.browserTts}, ElevenLabs ${args.elevenLabs}, OpenClaw \uc870\uc0ac ${args.openClawRemote}, OpenClaw \ud68c\uc758 ${args.openClawChat}.`,
       notices: {
         openClawStarting: "OpenClaw 조사 작업을 시작합니다.",
         openClawCompleted: "OpenClaw 작업이 완료되었습니다.",

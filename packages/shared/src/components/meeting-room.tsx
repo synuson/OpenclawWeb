@@ -1301,7 +1301,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                     </div>
                   </div>
                 ) : null}
-              <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>{(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => <p key={note} className="mb-2">{note}</p>)}<p>{copy.meeting.capabilitiesLine({ browserStt: browserSpeechSupported ? "브라우저" : "없음", whisper: capabilities?.openaiStt ? "준비" : "꺼짐", browserTts: browserTtsSupported ? "브라우저" : "없음", elevenLabs: capabilities?.elevenLabsTts ? "준비" : "꺼짐" })}</p></div>
+              <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>{(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => <p key={note} className="mb-2">{note}</p>)}<p>{copy.meeting.capabilitiesLine({ browserStt: browserSpeechSupported ? "\ube0c\ub77c\uc6b0\uc800" : "\uc5c6\uc74c", whisper: capabilities?.openaiStt ? "\uc900\ube44" : "\uaebc\uc9d0", browserTts: browserTtsSupported ? "\ube0c\ub77c\uc6b0\uc800" : "\uc5c6\uc74c", elevenLabs: capabilities?.elevenLabsTts ? "\uc900\ube44" : "\uaebc\uc9d0", openClawRemote: capabilities?.openclawRemote ? "\uc5f0\uacb0\ub428" : "\ub0b4\uc7a5 mock", openClawChat: capabilities?.openclawChat ? "\uc900\ube44" : "\uaebc\uc9d0" })}</p></div>
               </div>
             </ScrollArea>
           </Card>
