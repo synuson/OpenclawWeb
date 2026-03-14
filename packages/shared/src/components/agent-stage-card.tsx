@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CSSProperties } from "react";
+import { DEFAULT_LOCALE, type AppLocale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/messages";
 import type { Agent } from "@/lib/meeting/agents";
 import type { AgentStatus } from "@/lib/meeting/types";
@@ -9,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 type CharacterTheme = {
-  descriptor: string;
   photoUrl: string;
   photoPosition: string;
   shellBackground: string;
@@ -19,9 +19,6 @@ type CharacterTheme = {
   fallbackGradient: string;
 };
 
-const copy = getDictionary();
-
-const STATUS_LABELS: Record<AgentStatus, string> = copy.agentStatus;
 const STATUS_DOT_CLASSES: Record<AgentStatus, string> = {
   idle: "bg-ink/28",
   thinking: "bg-ember shadow-[0_0_0_6px_rgba(226,145,44,0.12)]",
@@ -31,7 +28,6 @@ const STATUS_DOT_CLASSES: Record<AgentStatus, string> = {
 
 const CHARACTER_THEMES: Record<Agent["id"], CharacterTheme> = {
   assistant: {
-    descriptor: "facilitator",
     photoUrl:
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1200&q=80",
     photoPosition: "center 28%",
@@ -43,7 +39,6 @@ const CHARACTER_THEMES: Record<Agent["id"], CharacterTheme> = {
     fallbackGradient: "linear-gradient(135deg, rgba(24, 170, 116, 0.24), rgba(44, 91, 245, 0.28))"
   },
   analyst: {
-    descriptor: "risk desk",
     photoUrl:
       "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=1200&q=80",
     photoPosition: "center 20%",
@@ -59,10 +54,12 @@ const CHARACTER_THEMES: Record<Agent["id"], CharacterTheme> = {
 type AgentHeroProps = {
   agent: Agent;
   theme: CharacterTheme;
+  locale: AppLocale;
 };
 
-function AgentHero({ agent, theme }: AgentHeroProps) {
+function AgentHero({ agent, theme, locale }: AgentHeroProps) {
   const [photoFailed, setPhotoFailed] = useState(false);
+  const copy = getDictionary(locale);
 
   return (
     <div
@@ -92,7 +89,7 @@ function AgentHero({ agent, theme }: AgentHeroProps) {
         </div>
       )}
       <div className="absolute left-4 top-4 rounded-full border border-white/25 bg-white/14 px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-white/86 backdrop-blur-md">
-        {theme.descriptor}
+        {copy.agentCard.descriptors[agent.id]}
       </div>
       <div className="absolute right-4 top-4 h-16 w-16 rounded-full blur-3xl" style={{ backgroundColor: theme.ambient }} />
       <div className="absolute inset-x-4 bottom-4 rounded-[22px] border border-white/18 bg-black/35 p-4 text-white backdrop-blur-md">
@@ -114,9 +111,16 @@ type AgentStageCardProps = {
   agent: Agent;
   status: AgentStatus;
   latestMessage: string;
+  locale?: AppLocale;
 };
 
-export function AgentStageCard({ agent, status, latestMessage }: AgentStageCardProps) {
+export function AgentStageCard({
+  agent,
+  status,
+  latestMessage,
+  locale = DEFAULT_LOCALE
+}: AgentStageCardProps) {
+  const copy = getDictionary(locale);
   const theme = CHARACTER_THEMES[agent.id];
   const highlightStyle: CSSProperties = {
     backgroundColor: theme.cardTint,
@@ -140,10 +144,10 @@ export function AgentStageCard({ agent, status, latestMessage }: AgentStageCardP
             {agent.emoji} {agent.title}
           </Badge>
         </div>
-        <Badge variant="outline">{STATUS_LABELS[status]}</Badge>
+        <Badge variant="outline">{copy.agentStatus[status]}</Badge>
       </div>
       <div className="mt-4">
-        <AgentHero agent={agent} theme={theme} />
+        <AgentHero agent={agent} theme={theme} locale={locale} />
       </div>
       <div className="mt-4 space-y-2">
         <p className="text-sm font-medium leading-6 text-ink">{agent.tagline}</p>
@@ -155,7 +159,7 @@ export function AgentStageCard({ agent, status, latestMessage }: AgentStageCardP
       >
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="text-[11px] uppercase tracking-[0.2em] text-mist">{copy.agentCard.latestBrief}</div>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-mist">{STATUS_LABELS[status]}</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-mist">{copy.agentStatus[status]}</span>
         </div>
         <p className="mt-2 line-clamp-4 text-sm leading-6 text-ink/85">{latestMessage}</p>
       </div>

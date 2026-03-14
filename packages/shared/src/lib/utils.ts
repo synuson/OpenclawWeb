@@ -2,9 +2,9 @@
   return values.filter(Boolean).join(" ");
 }
 
-export function formatTime(tsISO: string) {
+export function formatTime(tsISO: string, locale = "ko-KR") {
   const date = new Date(tsISO);
-  return date.toLocaleTimeString("ko-KR", {
+  return date.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit"
   });
@@ -14,23 +14,23 @@ export function uid(prefix = "id") {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function formatCurrency(value: number, currency = "KRW") {
-  return new Intl.NumberFormat("ko-KR", {
+export function formatCurrency(value: number, currency = "KRW", locale = "ko-KR") {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     maximumFractionDigits: currency === "KRW" ? 0 : 2
   }).format(value);
 }
 
-export function formatNumber(value: number, maximumFractionDigits = 0) {
-  return new Intl.NumberFormat("ko-KR", {
+export function formatNumber(value: number, maximumFractionDigits = 0, locale = "ko-KR") {
+  return new Intl.NumberFormat(locale, {
     maximumFractionDigits
   }).format(value);
 }
 
-export function formatSignedNumber(value: number, maximumFractionDigits = 0) {
+export function formatSignedNumber(value: number, maximumFractionDigits = 0, locale = "ko-KR") {
   const sign = value > 0 ? "+" : "";
-  return `${sign}${formatNumber(value, maximumFractionDigits)}`;
+  return `${sign}${formatNumber(value, maximumFractionDigits, locale)}`;
 }
 
 export function formatSignedPercent(value: number, maximumFractionDigits = 2) {

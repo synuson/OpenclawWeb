@@ -1,4 +1,6 @@
-﻿export type AgentId = "assistant" | "analyst";
+import type { AppLocale } from "@/lib/i18n/config";
+
+export type AgentId = "assistant" | "analyst";
 
 export type Provider = "cerebras" | "anthropic" | "openai" | "mock";
 
@@ -26,6 +28,7 @@ export type MeetingChatRequest = {
   participants: string[];
   history: ChatHistoryItem[];
   phase?: RoundPhase;
+  locale?: AppLocale;
 };
 
 export type MeetingChatResponse = {
@@ -77,12 +80,15 @@ export type MarketQuote = {
   previousClose?: number;
   volume?: number;
   delayed?: boolean;
+  session?: MarketSessionState;
 };
 
 export type MarketSparkPoint = {
   ts: string;
   price: number;
 };
+
+export type MarketSessionState = "always" | "pre" | "open" | "post" | "closed";
 
 export type MarketSnapshot = {
   tab: WorkspaceTab;
@@ -96,6 +102,7 @@ export type MarketSnapshot = {
   sparkline?: MarketSparkPoint[];
   notes: string[];
   delayed: boolean;
+  session: MarketSessionState;
 };
 
 export type PortfolioPosition = {
@@ -184,6 +191,7 @@ export type MeetingRoundRequest = {
   marketSnapshot?: MarketSnapshot | null;
   portfolioSnapshot?: PortfolioSnapshot | null;
   minutes?: MeetingMinutes | null;
+  locale?: AppLocale;
 };
 
 export type MeetingRoundResponse = {
@@ -215,6 +223,7 @@ export type MeetingTask = {
   taskId: string;
   sessionId: string;
   agentId: AgentId | string;
+  locale?: AppLocale;
   instruction: string;
   url?: string;
   status: MeetingTaskStatus;
