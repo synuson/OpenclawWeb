@@ -1014,9 +1014,16 @@ function MeetingScriptConsolePanel({
   timeline,
   input,
   isSending,
+  sttMode,
+  voiceAutoRun,
+  isListening,
+  isRecording,
+  browserSpeechSupported,
+  openAiSttSupported,
   composerRef,
   onInputChange,
   onComposerKeyDown,
+  onMicAction,
   onSend,
   onReset
 }: {
@@ -1025,13 +1032,19 @@ function MeetingScriptConsolePanel({
   timeline: MeetingTimelineItem[];
   input: string;
   isSending: boolean;
+  sttMode: SpeechMode;
+  voiceAutoRun: boolean;
+  isListening: boolean;
+  isRecording: boolean;
+  browserSpeechSupported: boolean;
+  openAiSttSupported: boolean;
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onMicAction: () => void;
   onSend: () => void;
   onReset: () => void;
-}) {
-  const panelCopy = dockPanelCopy(locale);
+}) {  const panelCopy = dockPanelCopy(locale);
   const timelineItems = timeline ?? [];
   const scriptEntries = timelineItems.filter((item) => item.kind === "message").slice(-10);
 
@@ -1092,6 +1105,34 @@ function MeetingScriptConsolePanel({
         }}
       >
         <div className="min-w-0 rounded-[28px] border border-cobalt/10 bg-white p-3 shadow-[0_18px_42px_rgba(18,24,36,0.05)]">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onMicAction}
+                disabled={(sttMode === "browser" && !browserSpeechSupported) || (sttMode === "whisper" && !openAiSttSupported) || isSending}
+              >
+                {sttMode === "browser"
+                  ? isListening
+                    ? copy.meeting.stopMic
+                    : voiceAutoRun
+                      ? copy.meeting.speakAndRun
+                      : copy.meeting.browserMic
+                  : isRecording
+                    ? copy.meeting.stopWhisper
+                    : voiceAutoRun
+                      ? copy.meeting.whisperAndRun
+                      : copy.meeting.whisperRecord}
+              </Button>
+              <Badge variant="outline">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
+            </div>
+            <div className="text-right text-xs text-mist">
+              <div>{copy.meeting.browserMicHint}</div>
+              <div className="mt-1">{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</div>
+            </div>
+          </div>
           <Textarea
             ref={composerRef}
             value={input}
@@ -1179,9 +1220,16 @@ function ParticipantStagePanel({
   timeline,
   input,
   isSending,
+  sttMode,
+  voiceAutoRun,
+  isListening,
+  isRecording,
+  browserSpeechSupported,
+  openAiSttSupported,
   composerRef,
   onInputChange,
   onComposerKeyDown,
+  onMicAction,
   onSend,
   onReset
 }: {
@@ -1199,13 +1247,19 @@ function ParticipantStagePanel({
   timeline: MeetingTimelineItem[];
   input: string;
   isSending: boolean;
+  sttMode: SpeechMode;
+  voiceAutoRun: boolean;
+  isListening: boolean;
+  isRecording: boolean;
+  browserSpeechSupported: boolean;
+  openAiSttSupported: boolean;
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onMicAction: () => void;
   onSend: () => void;
   onReset: () => void;
-}) {
-  return (
+}) {  return (
     <Card className="p-4 lg:p-5">
       <SectionHeader
         eyebrow={copy.meeting.stageEyebrow}
@@ -1238,9 +1292,16 @@ function ParticipantStagePanel({
             timeline={timeline}
             input={input}
             isSending={isSending}
+            sttMode={sttMode}
+            voiceAutoRun={voiceAutoRun}
+            isListening={isListening}
+            isRecording={isRecording}
+            browserSpeechSupported={browserSpeechSupported}
+            openAiSttSupported={openAiSttSupported}
             composerRef={composerRef}
             onInputChange={onInputChange}
             onComposerKeyDown={onComposerKeyDown}
+            onMicAction={onMicAction}
             onSend={onSend}
             onReset={onReset}
           />
@@ -2787,6 +2848,20 @@ export function MeetingRoom({
     recognition.start();
   }
 
+  function handleMicAction() {
+    if (sttMode === "browser") {
+      if (isListening) {
+        recognitionRef.current?.stop?.();
+        setIsListening(false);
+        return;
+      }
+      startBrowserSTT();
+      return;
+    }
+
+    void toggleWhisperRecording();
+  }
+
   async function toggleWhisperRecording() {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -3244,7 +3319,21 @@ export function MeetingRoom({
                   </div>
                 ) : null}
                             <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "\uAE30\uB2A5" : "Capabilities"}</div>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
+                    <div className="text-xs text-mist">{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={voiceAutoRun ? "secondary" : "outline"}
+                    onClick={() => setVoiceAutoRun((previous) => !previous)}
+                    className="rounded-full px-3"
+                  >
+                    {voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}
+                  </Button>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {availableFeatureLabels.map((label) => (
                     <span
@@ -3275,9 +3364,16 @@ export function MeetingRoom({
               timeline={timeline}
               input={input}
               isSending={isSending}
+              sttMode={sttMode}
+              voiceAutoRun={voiceAutoRun}
+              isListening={isListening}
+              isRecording={isRecording}
+              browserSpeechSupported={browserSpeechSupported}
+              openAiSttSupported={Boolean(capabilities?.openaiStt)}
               composerRef={composerRef}
               onInputChange={setInput}
               onComposerKeyDown={handleComposerKeyDown}
+              onMicAction={handleMicAction}
               onSend={() => void handleSend()}
               onReset={resetMeeting}
             />
