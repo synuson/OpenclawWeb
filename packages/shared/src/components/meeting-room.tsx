@@ -154,7 +154,6 @@ const PERSONA_AVATAR_PRESETS: Record<
     label: { ko: "그리드", en: "Grid" }
   }
 };
-
 const MARKET_SESSION_LABELS: Record<AppLocale, Record<Exclude<MarketSessionState, "always">, string>> = {
   ko: {
     open: "\uac1c\uc7a5",
@@ -181,7 +180,7 @@ function labelForMarketSession(session: MarketSessionState | undefined, locale: 
 function describeMarketSession(session: MarketSessionState | undefined, locale: AppLocale) {
   switch (session) {
     case "closed":
-      return locale === "ko" ? "\uc2dc\uc7a5 \ud734\uc7a5 \u00b7 \ub9c8\uc9c0\ub9c9 \uc885\uac00 \uae30\uc900" : "Market closed · last close";
+      return locale === "ko" ? "\uc2dc\uc7a5 \ud734\uc7a5 \u00b7 \ub9c8\uc9c0\ub9c9 \uc885\uac00 \uae30\uc900" : "Market closed 쨌 last close";
     case "pre":
       return locale === "ko" ? "\uc7a5\uc804 \uc2dc\uc138 \uad6c\uac04" : "Pre-market session";
     case "post":
@@ -214,7 +213,7 @@ function getSnapshotMetaDetail(snapshot: MarketSnapshot | null, locale: AppLocal
     return "";
   }
 
-  return [describeMarketSession(snapshot.session, locale), snapshot.provider].filter(Boolean).join(" · ");
+  return [describeMarketSession(snapshot.session, locale), snapshot.provider].filter(Boolean).join(" 쨌 ");
 }
 
 function getMarketProviderLabel(snapshot: MarketSnapshot | null, copy: ReturnType<typeof getDictionary>) {
@@ -400,33 +399,33 @@ function AgentAvatarBadge({
 function dockPanelCopy(locale: AppLocale) {
   return locale === "ko"
     ? {
-        stageNotice: "메시지를 보내면 적합한 AI가 먼저 답하고, 필요하면 조사까지 이어집니다.",
-        liveScriptEyebrow: "라이브 스크립트",
-        liveScriptTitle: "회의 대화",
-        liveScriptDescription: "메인 발표 흐름과 실제 채팅을 한 스트림으로 정리합니다.",
-        autoRouting: "AI 자동 라우팅",
+        stageNotice: "\uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uC801\uD569\uD55C AI\uAC00 \uBA3C\uC800 \uB2F5\uD558\uACE0, \uD544\uC694\uD558\uBA74 \uC870\uC0AC\uAE4C\uC9C0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4.",
+        liveScriptEyebrow: "\uB77C\uC774\uBE0C \uC2A4\uD06C\uB9BD\uD2B8",
+        liveScriptTitle: "\uD68C\uC758 \uB300\uD654",
+        liveScriptDescription: "\uBA54\uC778 \uBC1C\uD45C \uD750\uB984\uACFC \uC2E4\uC81C \uCC44\uD305\uC744 \uD55C \uC2A4\uD2B8\uB9BC\uC73C\uB85C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
+        autoRouting: "AI \uC790\uB3D9 \uB77C\uC6B0\uD305",
         userCameraEyebrow: "내 카메라",
         userCameraTitle: "내 화면",
-        userCameraDescription: "회의 우측 하단에 고정되는 로컬 카메라 화면입니다.",
+        userCameraDescription: "회의 화면 우하단에 고정되는 로컬 카메라 화면입니다.",
         dockEyebrow: "도킹 패널",
         dockTitle: "편집 / 회의록 / 조사기록",
-        dockDescription: "브라우저 디버거처럼 우측에 붙어 있는 보조 패널입니다.",
+        dockDescription: "브라우저 개발자 도구처럼 오른쪽에 붙는 보조 패널입니다.",
         dockTabs: {
           session: "편집",
           minutes: "회의록",
           research: "조사기록"
         } satisfies Record<DockTab, string>,
-        dockOpen: "도크 열림",
-        dockClosed: "도크 닫힘",
+        dockOpen: "패널 열림",
+        dockClosed: "패널 닫힘",
         openDock: "열기",
-        closeDock: "접기",
+        closeDock: "닫기",
         personaEyebrow: "AI 페르소나",
         personaTitle: "이름 / 말투 / 아바타",
-        personaDescription: "서윤과 이안의 노출 이름, 말투, 아바타 프리셋, 이미지 톤을 바꿉니다.",
+        personaDescription: "서윤과 이안의 표시 이름, 말투, 아바타 프리셋과 카드 테마를 조정합니다.",
         displayNameLabel: "이름",
         toneLabel: "말투",
         avatarLabel: "아바타",
-        avatarToneLabel: "이미지 톤",
+        avatarToneLabel: "카드 테마",
         resetPersona: "기본값 복원",
         sessionActivity: "편집 로그",
         sessionEmpty: "아직 편집 기록이 없습니다.",
@@ -440,15 +439,15 @@ function dockPanelCopy(locale: AppLocale) {
         researchHistory: "조사 히스토리",
         researchStatus: "조사 상태",
         marketHubEyebrow: "금융 허브",
-        marketHubDescription: "시장 선택은 왼쪽, 대화와 판단은 오른쪽에 집중합니다.",
+        marketHubDescription: "시장 선택은 왼쪽, 주요 판단은 오른쪽에 집중합니다.",
         meetingOverviewTitle: "OpenClaw 전략 회의실"
       }
     : {
-        stageNotice: "Send a message and the right AI will answer first, then research if needed.",
-        liveScriptEyebrow: "Live script",
-        liveScriptTitle: "Meeting conversation",
-        liveScriptDescription: "Keep the on-stage discussion and the real chat in one stream.",
-        autoRouting: "Auto routing",
+        stageNotice: "\uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uC801\uD569\uD55C AI\uAC00 \uBA3C\uC800 \uB2F5\uD558\uACE0, \uD544\uC694\uD558\uBA74 \uC870\uC0AC\uAE4C\uC9C0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4.",
+        liveScriptEyebrow: "\uB77C\uC774\uBE0C \uC2A4\uD06C\uB9BD\uD2B8",
+        liveScriptTitle: "\uD68C\uC758 \uB300\uD654",
+        liveScriptDescription: "\uBA54\uC778 \uBC1C\uD45C \uD750\uB984\uACFC \uC2E4\uC81C \uCC44\uD305\uC744 \uD55C \uC2A4\uD2B8\uB9BC\uC73C\uB85C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
+        autoRouting: "AI \uC790\uB3D9 \uB77C\uC6B0\uD305",
         userCameraEyebrow: "My camera",
         userCameraTitle: "Local view",
         userCameraDescription: "Your local camera stays pinned in the lower-right area.",
@@ -466,11 +465,11 @@ function dockPanelCopy(locale: AppLocale) {
         closeDock: "Collapse",
         personaEyebrow: "AI persona",
         personaTitle: "Name / tone / avatar",
-        personaDescription: "Change the visible name, tone, avatar preset, and image mood for Seoyun and Ian.",
+        personaDescription: "Change the visible name, tone, avatar preset, and card theme for Seoyun and Ian.",
         displayNameLabel: "Name",
         toneLabel: "Tone",
         avatarLabel: "Avatar",
-        avatarToneLabel: "Image tone",
+        avatarToneLabel: "Card theme",
         resetPersona: "Reset",
         sessionActivity: "Edit log",
         sessionEmpty: "No edit history yet.",
@@ -645,17 +644,14 @@ function MarketQuoteCard({
             </div>
           </div>
         </div>
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mt-5">
           <div>
             <div className="text-[2rem] font-semibold leading-none text-ink md:text-3xl">
               {formatCurrency(quote.price, quote.currency, locale)}
             </div>
             <div className="mt-2 text-sm text-mist">{quote.market}</div>
           </div>
-          <div className="rounded-[18px] border border-ink/10 bg-white px-3 py-2 sm:min-w-[96px] sm:text-right">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.marketReferenceTime}</div>
-            <div className="mt-1 text-sm font-medium text-ink">{formatTime(quote.updatedAt, locale)}</div>
-          </div>
+
         </div>
         <div className="mt-4">
           <div className="h-2 rounded-full bg-ink/6">
@@ -821,7 +817,6 @@ function SnapshotOverview({
     ? `${formatSignedPercent(heroQuote.changePercent)} · ${formatSignedNumber(heroQuote.change, heroQuote.currency === "KRW" ? 0 : 2, intlLocale)}`
     : getSnapshotMetaDetail(snapshot, locale) || providerLabel;
   const normalizedPriceChangeDetail = priceChangeDetail.replace("쨌", "·");
-
   return (
     <div className={cn("mb-4 overflow-hidden rounded-[30px] border border-ink/10 p-6 text-white shadow-panel", heroAccent)}>
       <div className="grid gap-4">
@@ -1101,11 +1096,7 @@ function MeetingScriptConsolePanel({
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={onComposerKeyDown}
-            placeholder={
-              locale === "ko"
-                ? "지금 보고 있는 시장, 종목, 포지션에 대해 메시지를 보내보세요."
-                : "Ask about the market, instrument, or position you are watching right now."
-            }
+            placeholder={copy.meeting.placeholder}
             disabled={isSending}
             rows={4}
             autoFocus
@@ -1650,22 +1641,27 @@ function PersonaEditorCard({
           </div>
         </div>
         <div className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-mist">
-          <span>{panelCopy.avatarToneLabel}</span>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span>{panelCopy.avatarToneLabel}</span>
+            <span className="text-[10px] font-medium normal-case tracking-normal text-mist/80">
+              {locale === "ko" ? "카드 색감" : "Card mood"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             {Object.entries(PERSONA_AVATAR_THEMES).map(([variant, option]) => (
               <button
                 key={variant}
                 type="button"
                 onClick={() => onChange({ avatarVariant: variant as AgentAvatarVariant })}
                 className={cn(
-                  "overflow-hidden rounded-[18px] border text-left transition",
-                  agent.avatarVariant === variant ? "border-cobalt/28 shadow-[0_0_0_1px_rgba(44,91,245,0.18)]" : "border-ink/10 hover:border-ink/18"
+                  "flex items-center gap-2 rounded-full border bg-white px-3 py-2 text-left transition",
+                  agent.avatarVariant === variant
+                    ? "border-cobalt/28 shadow-[0_0_0_1px_rgba(44,91,245,0.18)]"
+                    : "border-ink/10 hover:border-ink/18"
                 )}
               >
-                <div className={cn("h-14 w-full", option.previewClass)} />
-                <div className="px-2 py-2 text-[10px] font-semibold tracking-[0.14em] text-ink/72">
-                  {option.label[locale]}
-                </div>
+                <span className={cn("h-4 w-4 shrink-0 rounded-full border", option.avatarClass)} />
+                <span className="text-[11px] font-semibold tracking-[0.08em] text-ink/72">{option.label[locale]}</span>
               </button>
             ))}
           </div>
@@ -1701,24 +1697,19 @@ function SessionDockPanel({
   onLocaleChange: (nextLocale: AppLocale) => void;
 }) {
   const panelCopy = dockPanelCopy(locale);
+  const [activePersonaId, setActivePersonaId] = useState<AgentId>(() => agents[0]?.id ?? "assistant");
+
+  useEffect(() => {
+    if (!agents.some((agent) => agent.id === activePersonaId)) {
+      setActivePersonaId(agents[0]?.id ?? "assistant");
+    }
+  }, [activePersonaId, agents]);
+
+  const activePersonaAgent = agents.find((agent) => agent.id === activePersonaId) ?? agents[0];
+  const activePersonaIndex = activePersonaAgent ? agents.findIndex((agent) => agent.id === activePersonaAgent.id) : 0;
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionWorkspace}</div>
-          <div className="mt-2 text-sm font-medium text-ink">{activeTabLabel}</div>
-        </div>
-        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionParticipants}</div>
-          <div className="mt-2 text-sm font-medium text-ink">{copy.meeting.participants(agents.length + 1)}</div>
-        </div>
-        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionSavedAt}</div>
-          <div className="mt-2 text-sm font-medium text-ink">{latestSavedAt}</div>
-        </div>
-      </div>
-
+    <div className="flex flex-col gap-4">
       <div className="rounded-[24px] border border-ink/10 bg-white p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
@@ -1745,41 +1736,35 @@ function SessionDockPanel({
             ) : null}
           </div>
         </div>
-        <div className="mt-4 grid gap-4">
-          {agents.map((agent) => (
-            <PersonaEditorCard
-              key={agent.id}
-              agent={agent}
-              locale={locale}
-              value={personas[agent.id]}
-              onChange={(patch) => onPersonaChange(agent.id, patch)}
-              onReset={() => onPersonaReset(agent.id)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
-        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.sessionActivity}</div>
-        <ScrollArea className="meeting-column-scroll h-[260px] pr-1">
-          <div className="space-y-2">
-            {timeline.length > 0 ? (
-              [...timeline].slice(-8).reverse().map((item) => (
-                <div key={item.id} className="rounded-[18px] border border-ink/10 bg-white px-3 py-3">
-                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-mist">
-                    <span>{item.speakerLabel}</span>
-                    <span>{formatTime(item.ts, copy.app.dateLocale)}</span>
-                  </div>
-                  <div className="text-sm leading-6 text-ink/76">{item.text}</div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-ink/12 px-4 py-8 text-sm text-mist">
-                {panelCopy.sessionEmpty}
-              </div>
-            )}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex flex-wrap gap-2 rounded-full border border-ink/10 bg-white/82 p-1">
+            {agents.map((agent, index) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => setActivePersonaId(agent.id)}
+                className={cn(
+                  "rounded-full px-3 py-2 text-sm font-medium transition",
+                  activePersonaId === agent.id ? "bg-ink text-white shadow-[0_10px_24px_rgba(18,24,36,0.16)]" : "text-mist hover:bg-ink/5 hover:text-ink"
+                )}
+              >
+                {index + 1}. {agent.name}
+              </button>
+            ))}
           </div>
-        </ScrollArea>
+          <Badge variant="outline">{`${activePersonaIndex + 1} / ${agents.length}`}</Badge>
+        </div>
+        {activePersonaAgent ? (
+          <div className="mt-4">
+            <PersonaEditorCard
+              agent={activePersonaAgent}
+              locale={locale}
+              value={personas[activePersonaAgent.id]}
+              onChange={(patch) => onPersonaChange(activePersonaAgent.id, patch)}
+              onReset={() => onPersonaReset(activePersonaAgent.id)}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -2043,7 +2028,7 @@ function MeetingDebuggerDock({
   }
 
   return (
-    <Card className="flex min-h-0 flex-col overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)]">
+    <Card className="flex min-h-0 flex-col self-start overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:max-h-[calc(100dvh-14rem)]">
       <div className="flex items-center justify-between border-b border-ink/8 px-3 py-3">
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
@@ -2136,6 +2121,7 @@ export function MeetingRoom({
   const [isRecording, setIsRecording] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [browserSpeechSupported, setBrowserSpeechSupported] = useState(false);
+  const [browserTtsSupported, setBrowserTtsSupported] = useState(false);
   const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("btc");
@@ -2214,7 +2200,7 @@ export function MeetingRoom({
           : "bg-ink/28";
   const meetingShellTitle = experienceCopy.meetingOverviewTitle;
   const selectedSnapshotDetail =
-    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" · ") ||
+    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" 쨌 ") ||
     selectedSnapshotSummary;
 
   useEffect(() => {
@@ -2229,6 +2215,7 @@ export function MeetingRoom({
       }).SpeechRecognition ||
       (window as Window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).webkitSpeechRecognition;
       setBrowserSpeechSupported(Boolean(recognitionSource));
+      setBrowserTtsSupported("speechSynthesis" in window);
     } catch {
       setMinutesHistory([]);
     }
@@ -2724,10 +2711,10 @@ export function MeetingRoom({
       setNotice(
         data.meta.usedResearch
           ? locale === "ko"
-            ? `${agentsById[data.meta.finalSpeakerId].name}이 조사 내용을 반영해 답변했습니다.`
+            ? `${agentsById[data.meta.finalSpeakerId].name}??議곗궗 ?댁슜??諛섏쁺???듬??덉뒿?덈떎.`
             : `${agentsById[data.meta.finalSpeakerId].name} answered with research applied.`
           : locale === "ko"
-            ? `${agentsById[data.meta.finalSpeakerId].name}의 답변이 도착했습니다.`
+            ? `${agentsById[data.meta.finalSpeakerId].name}???듬????꾩갑?덉뒿?덈떎.`
             : `${agentsById[data.meta.finalSpeakerId].name} replied.`
       );
       void autoplayTurns(data.turns);
@@ -2810,7 +2797,7 @@ export function MeetingRoom({
   return (
     <div className="min-h-dvh bg-paper px-3 py-3 text-ink md:px-5">
       <div className="dashboard-shell mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1860px] flex-col gap-3 rounded-[34px] border border-white/50 bg-white/35 p-3 shadow-glow backdrop-blur-xl">
-        <header className="panel-surface grid gap-4 rounded-[30px] px-5 py-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:items-start">
+        <header className="panel-surface rounded-[30px] px-5 py-5">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{copy.meeting.headerBadge}</Badge>
@@ -2829,9 +2816,10 @@ export function MeetingRoom({
                 tone="cobalt"
               />
               <OverviewMetric
-                label={experienceCopy.sessionParticipants}
-                value={String(agents.length + 1).padStart(2, "0")}
-                detail={agents.map((agent) => agent.name).join(" · ")}
+                label={copy.meeting.marketPulse}
+                value={selectedSnapshotStatusLabel}
+                detail={[describeMarketSession(selectedSnapshot?.session, locale), snapshotUpdatedAt].filter(Boolean).join(" 쨌 ")}
+                tone={selectedSnapshot?.status === "live" ? "mint" : selectedSnapshot?.status === "delayed" ? "ember" : "default"}
               />
               <OverviewMetric
                 label={copy.meeting.minutesTitle}
@@ -2839,30 +2827,6 @@ export function MeetingRoom({
                 detail={minutes?.title || copy.meeting.timelineEmpty}
                 tone="mint"
               />
-            </div>
-          </div>
-          <div className="rounded-[28px] border border-ink/10 bg-white p-4 shadow-[0_14px_34px_rgba(18,24,36,0.04)]">
-            <div className="space-y-1">
-              <div className="section-kicker">{experienceCopy.dockEyebrow}</div>
-              <div className="font-display text-2xl leading-none text-ink">{experienceCopy.dockTitle}</div>
-              <p className="text-sm leading-6 text-mist">{experienceCopy.dockDescription}</p>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-[22px] border border-ink/10 bg-white p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{experienceCopy.sessionWorkspace}</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{activeTabLabel}</div>
-                <div className="mt-1 text-sm text-mist">{selectedSnapshot?.headline || experienceCopy.marketHubDescription}</div>
-              </div>
-              <div className="rounded-[22px] border border-ink/10 bg-white p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.stageTitle}</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{copy.meeting.participants(agents.length + 1)}</div>
-                <div className="mt-1 text-sm text-mist">{experienceCopy.stageNotice}</div>
-              </div>
-            </div>
-            <div className="mt-4 rounded-[22px] border border-ink/10 bg-white p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{experienceCopy.dockEyebrow}</div>
-              <div className="mt-2 text-lg font-semibold text-ink">{experienceCopy.dockTabs[activeDockTab]}</div>
-              <div className="mt-1 text-sm text-mist">{dockOpen ? experienceCopy.dockDescription : `${experienceCopy.openDock} · ${experienceCopy.dockDescription}`}</div>
             </div>
           </div>
         </header>
@@ -3071,7 +3035,24 @@ export function MeetingRoom({
                     </div>
                   </div>
                 ) : null}
-              <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>{(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => <p key={note} className="mb-2">{note}</p>)}<p>{copy.meeting.capabilitiesLine({ browserStt: browserSpeechSupported ? "브라우저" : "없음", whisper: capabilities?.openaiStt ? "준비" : "꺼짐", browserTts: typeof window !== "undefined" && "speechSynthesis" in window ? "브라우저" : "없음", elevenLabs: capabilities?.elevenLabsTts ? "준비" : "꺼짐", openClawRemote: capabilities?.openclawRemote ? "연결됨" : "내장 mock", openClawChat: capabilities?.openclawChat ? "준비" : "꺼짐" })}</p></div>              </div>
+                            <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>
+                {(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => (
+                  <p key={note} className="mb-2">
+                    {note}
+                  </p>
+                ))}
+                <p>
+                  {copy.meeting.capabilitiesLine({
+                    browserStt: browserSpeechSupported ? "브라우저" : "없음",
+                    whisper: capabilities?.openaiStt ? "준비" : "꺼짐",
+                    browserTts: browserTtsSupported ? "브라우저" : "없음",
+                    elevenLabs: capabilities?.elevenLabsTts ? "준비" : "꺼짐",
+                    openClawRemote: capabilities?.openclawRemote ? "연결됨" : "내장 mock",
+                    openClawChat: capabilities?.openclawChat ? "준비" : "꺼짐"
+                  })}
+                </p>
+              </div>              </div>
             </ScrollArea>
           </Card>
 

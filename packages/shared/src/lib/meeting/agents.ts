@@ -33,19 +33,13 @@ type AgentCopyEntry = {
   avatarPreset: AgentAvatarPreset;
 };
 
-const AGENT_COPY: Record<
-  AppLocale,
-  Record<
-    AgentId,
-    AgentCopyEntry
-  >
-> = {
+const AGENT_COPY: Record<AppLocale, Record<AgentId, AgentCopyEntry>> = {
   ko: {
     assistant: {
       name: "서윤",
       title: "진행자",
       mentionAliases: ["assistant", "moderator", "mc", "seoyun", "서윤", "진행자"],
-      toneStyle: "차분하고 또렷하게 결론을 먼저 말한 뒤, 필요한 맥락만 짧게 덧붙입니다.",
+      toneStyle: "차분하고 명확하게 결론부터 말하며, 필요한 맥락만 짧게 덧붙입니다.",
       avatarVariant: "aurora",
       avatarPreset: "core"
     },
@@ -53,7 +47,7 @@ const AGENT_COPY: Record<
       name: "이안",
       title: "분석가",
       mentionAliases: ["analyst", "an", "ian", "이안", "분석가"],
-      toneStyle: "숫자와 리스크를 먼저 짚고, 과장 없이 판단 근거를 선명하게 정리합니다.",
+      toneStyle: "숫자와 리스크를 먼저 짚고, 과장 없이 판단 근거를 짧고 선명하게 설명합니다.",
       avatarVariant: "sunset",
       avatarPreset: "orbit"
     }
@@ -105,10 +99,10 @@ function sanitizeToneStyle(value: string | undefined, fallback: string) {
 function buildPersonaPrompt(agentId: AgentId, locale: AppLocale, persona: AgentPersonaConfig) {
   return locale === "ko"
     ? [
-        `현재 화면에서 너의 이름은 ${persona.displayName}이다.`,
-        `${agentId === "assistant" ? "사용자와 대화 흐름을 정리하는 진행자" : "시장과 근거를 분석하는 분석가"} 역할은 유지하되, 말투는 다음 지시를 따른다.`,
+        `현재 화면에서 당신의 표시 이름은 ${persona.displayName}입니다.`,
+        `${agentId === "assistant" ? "진행자" : "분석가"} 역할은 유지하되, 아래 말투 지침을 따르세요.`,
         `말투: ${persona.toneStyle}`,
-        "메인 채팅에서는 도구 이름이나 내부 시스템을 드러내지 말고, 필요한 조사를 마친 뒤 자연스럽게 답한다."
+        "메인 채팅에서는 내부 시스템이나 툴 이름을 드러내지 말고, 필요한 조사 후에도 자연스럽게 답하세요."
       ].join("\n")
     : [
         `In this interface your visible name is ${persona.displayName}.`,
@@ -128,11 +122,7 @@ function buildMentionAliases(defaults: string[], displayName: string) {
   );
 }
 
-function resolvePersonaConfig(
-  agentId: AgentId,
-  locale: AppLocale,
-  overrides?: AgentPersonaOverrides
-): AgentPersonaConfig {
+function resolvePersonaConfig(agentId: AgentId, locale: AppLocale, overrides?: AgentPersonaOverrides): AgentPersonaConfig {
   const defaults = getDefaultAgentEntry(agentId, locale);
   const custom = overrides?.[agentId];
 
@@ -151,10 +141,7 @@ export function getDefaultAgentPersonas(locale: AppLocale = DEFAULT_LOCALE): Rec
   };
 }
 
-export function getAgents(
-  locale: AppLocale = DEFAULT_LOCALE,
-  personaOverrides?: AgentPersonaOverrides
-): Agent[] {
+export function getAgents(locale: AppLocale = DEFAULT_LOCALE, personaOverrides?: AgentPersonaOverrides): Agent[] {
   const assistantRole = getRoleDefinitionForAgent("assistant", locale);
   const analystRole = getRoleDefinitionForAgent("analyst", locale);
   const agentCopy = AGENT_COPY[locale];

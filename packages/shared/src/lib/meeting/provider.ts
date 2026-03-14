@@ -7,8 +7,7 @@ import {
 } from "@/lib/openclaw/client";
 import type { AgentId, ChatHistoryItem, MeetingAction, Provider, RoundPhase } from "@/lib/meeting/types";
 
-const BROWSER_INTENT_REGEX =
-  /(browse|browser|openclaw|web|internet|search|look up|find|research|latest|source|verify|price target|filing|news|investigate|chart|뉴스|검색|웹|브라우저|조사|최신|출처|검증|링크|기사|차트)/i;
+const BROWSER_INTENT_REGEX = /(browse|browser|openclaw|web|internet|search|look up|find|research|latest|source|verify|price target|filing|news|investigate|chart|뉴스|검색|브라우저|웹|인터넷|조사|최신|출처|검증|기사|차트)/i;
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const DIRECT_PROVIDER_ORDER: Array<Exclude<Provider, "openclaw" | "mock">> = ["openai", "anthropic", "cerebras"];
 
@@ -444,9 +443,127 @@ function buildFacilitatorMockReply(message: string, agentSystemPrompt: string, l
 
 function callMock(args: CallLLMArgs) {
   const locale = args.locale ?? DEFAULT_LOCALE;
-  return args.agentId === "analyst"
-    ? buildAnalystMockReply(args.message, args.agentSystemPrompt, locale)
-    : buildFacilitatorMockReply(args.message, args.agentSystemPrompt, locale);
+  const lowerMessage = args.message.toLowerCase();
+  const focus =
+    /btc|bitcoin|비트코인/.test(lowerMessage)
+      ? locale === "ko"
+        ? "비트코인 흐름과 변동성"
+        : "Bitcoin flow and volatility"
+      : /kospi|kosdaq|samsung|005930|kr|국내/.test(lowerMessage)
+        ? locale === "ko"
+          ? "국내 증시 수급과 대형주 흐름"
+          : "Korean equity flow and large-cap leadership"
+        : /nasdaq|s&p|qqq|aapl|nvda|us|미국/.test(lowerMessage)
+          ? locale === "ko"
+            ? "미국 지수와 AI 대형주 순환"
+            : "US index momentum and AI large-cap rotation"
+          : locale === "ko"
+            ? "시장 전반의 리스크와 포지션"
+            : "Cross-asset risk and positioning";
+
+  if (args.agentId === "analyst") {
+    const [metricsSection, risksSection, sourcesSection, scenariosSection, recommendationSection] = getAnalystSections(locale);
+
+    return formatSections(
+      [
+        [
+          metricsSection,
+          locale === "ko"
+            ? [
+                `- 현재 핵심 관찰 포인트: ${focus}`,
+                "- 시장 스냅샷 기준으로 추세는 유지되지만 단기 과열 여부를 다시 확인할 필요가 있습니다.",
+                "- 의사결정 임계값은 직전 고점 돌파 여부와 거래대금 유지 여부입니다."
+              ]
+            : [
+                `- Current focus: ${focus}`,
+                "- The snapshot still supports the trend, but short-term overheating needs a recheck.",
+                "- The decision threshold is whether price breaks the last swing levels and whether turnover holds up."
+              ]
+        ],
+        [
+          risksSection,
+          locale === "ko"
+            ? [
+                "- 리스크: 변동성 확대 | 영향도: high | 발생확률: medium | 근거: 단기 가격 반응이 빠르고 추격 매수가 붙을 수 있습니다. | 대응: 신규 비중을 줄이고 재확인합니다.",
+                "- 리스크: 뉴스 공백 해석 오류 | 영향도: medium | 발생확률: medium | 근거: 가격만으로 판단하면 오해할 수 있습니다. | 대응: 뉴스와 수급을 함께 점검합니다."
+              ]
+            : [
+                "- Risk: volatility expansion | Impact: high | Probability: medium | Evidence: short-term price reactions are fast and chase flows can build quickly | Mitigation: cut size and re-validate",
+                "- Risk: misreading a news vacuum | Impact: medium | Probability: medium | Evidence: price-only interpretation can be misleading | Mitigation: validate with news and flow together"
+              ]
+        ],
+        [sourcesSection, extractSourceLines(args.agentSystemPrompt, locale)],
+        [
+          scenariosSection,
+          locale === "ko"
+            ? [
+                "- 베이스: 현재 추세 유지, 다만 눌림 확인 전까지는 추격 매수 제한",
+                "- 낙관: 거래대금과 모멘텀이 동반되면 추가 상승 여지 확대",
+                "- 비관: 지지선 이탈과 뉴스 약화가 겹치면 단기 방어 전환 필요"
+              ]
+            : [
+                "- Base: the current trend holds, but chasing stays limited until a pullback confirms",
+                "- Bull: upside expands if turnover and momentum stay aligned",
+                "- Bear: if support breaks while news deteriorates, shift to defense quickly"
+              ]
+        ],
+        [
+          recommendationSection,
+          locale === "ko"
+            ? ["- 신규 판단은 작은 비중으로 시작하고, 다음 확인 시점까지의 리스크 한도를 먼저 정하세요."]
+            : ["- Start any new exposure small and define the risk limit before the next checkpoint."]
+        ]
+      ],
+      locale
+    );
+  }
+
+  const [conclusionSection, evidenceSection, actionsSection, unresolvedSection, minutesSection] = getFacilitatorSections(locale);
+  const labels = getActionItemFieldLabels(locale);
+  const actionTask = BROWSER_INTENT_REGEX.test(lowerMessage)
+    ? locale === "ko"
+      ? "OpenClaw 후속 조사 범위를 확정한다"
+      : "Define the scope for the OpenClaw follow-up"
+    : locale === "ko"
+      ? "다음 확인 시점과 판단 기준을 확정한다"
+      : "Lock the next checkpoint and decision criteria";
+
+  return formatSections(
+    [
+      [
+        conclusionSection,
+        locale === "ko"
+          ? ["- 현재 정보만으로도 다음 액션을 정할 수 있지만, 실행 전 마지막 검증 절차는 유지해야 합니다."]
+          : ["- The current information is enough to define the next action, but the final pre-execution check still needs to stay in place."]
+      ],
+      [
+        evidenceSection,
+        locale === "ko"
+          ? [
+              "- 분석가 관점에서는 추세 활용 가능성이 있으나, 리스크 관리가 먼저입니다.",
+              "- 현재 스냅샷을 근거로 작업 결론을 정리했습니다."
+            ]
+          : [
+              "- From the analyst view, the trend is usable, but risk management has to come first.",
+              "- The current snapshot is enough to support the working conclusion."
+            ]
+      ],
+      [[actionsSection][0], [`- ${labels.task}: ${actionTask} | ${labels.owner}: ${locale === "ko" ? "서윤" : "Seoyun"} | ${labels.dueAt}: ${labels.tbd} | ${labels.status}: todo`]],
+      [
+        unresolvedSection,
+        locale === "ko"
+          ? ["- 외부 뉴스와 실시간 호가를 어디까지 추가 검증할지는 아직 열려 있습니다."]
+          : ["- The scope of additional validation for external news and live quotes is still open."]
+      ],
+      [
+        minutesSection,
+        locale === "ko"
+          ? ["- 이번 라운드는 추세 활용 가능성을 확인했고, 실행 전 검증 단계를 유지하는 것으로 정리합니다."]
+          : ["- This round confirmed that the trend may be tradable, while preserving a final validation step before execution."]
+      ]
+    ],
+    locale
+  );
 }
 
 async function callCerebras(args: CallLLMArgs) {
