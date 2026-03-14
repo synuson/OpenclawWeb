@@ -246,6 +246,18 @@ export type Capabilities = {
   openclawChat: boolean;
 };
 
+export type OpenClawConnectionProbe = {
+  configured: boolean;
+  reachable: boolean;
+  status: "unconfigured" | "reachable" | "unreachable";
+  checkedAt: string;
+  baseUrl: string;
+  chatPath: string;
+  tasksPath: string;
+  message: string;
+  statusCode?: number;
+};
+
 export type MeetingTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type MeetingTaskLog = {

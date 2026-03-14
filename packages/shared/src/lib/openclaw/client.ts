@@ -86,9 +86,40 @@ type RemoteChatPayload = {
   }>;
 };
 
+type RemoteResponsesPayload = {
+  id?: string;
+  model?: string;
+  output_text?: string;
+  output?: Array<{
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+};
+
+type RemoteChatCompletionsPayload = {
+  id?: string;
+  model?: string;
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
+type OpenClawRequestError = Error & {
+  statusCode?: number;
+};
+
 const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL?.replace(/\/$/, "") || "";
 const OPENCLAW_CHAT_PATH = normalizePath(process.env.OPENCLAW_CHAT_PATH || "/chat");
+const OPENCLAW_CHAT_COMPLETIONS_PATH = normalizePath(process.env.OPENCLAW_CHAT_COMPLETIONS_PATH || "/v1/chat/completions");
+const OPENCLAW_RESPONSES_PATH = normalizePath(process.env.OPENCLAW_RESPONSES_PATH || "/v1/responses");
 const OPENCLAW_TASKS_PATH = normalizePath(process.env.OPENCLAW_TASKS_PATH || "/tasks");
+const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL || process.env.OPENAI_MODEL || "openai-codex/gpt-5.3-codex";
+const OPENCLAW_MAX_TOKENS = Number(process.env.OPENCLAW_MAX_TOKENS || 420);
 const OPENCLAW_TASK_DETAIL_PATH = normalizePath(process.env.OPENCLAW_TASK_DETAIL_PATH || "/tasks/:id");
 const OPENCLAW_TASK_ARTIFACTS_PATH = normalizePath(
   process.env.OPENCLAW_TASK_ARTIFACTS_PATH || "/tasks/:id/artifacts"
@@ -99,22 +130,22 @@ const OPENCLAW_EXTRA_HEADERS = parseExtraHeaders(process.env.OPENCLAW_EXTRA_HEAD
 
 const OPENCLAW_COPY = {
   ko: {
-    title: "OpenClaw 브라우저 태스크",
+    title: "OpenClaw 브라우저 작업",
     agent: "에이전트",
     status: "상태",
     recentSummary: "최근 요약",
     noUrl: "명시된 URL이 없습니다.",
     defaultLog: "OpenClaw 로그",
-    createdSummary: "OpenClaw 작업이 생성되었습니다.",
-    createdLog: "작업이 생성되었습니다. 브라우저 컨텍스트를 준비합니다.",
-    openingSummary: (agentName: string) => `${agentName}이 OpenClaw 브라우저 컨텍스트를 열고 있습니다.`,
+    createdSummary: "OpenClaw 작업을 만들었습니다.",
+    createdLog: "작업을 만들고 브라우저 컨텍스트를 준비하고 있습니다.",
+    openingSummary: (agentName: string) => `${agentName}가 OpenClaw 브라우저 컨텍스트를 여는 중입니다.`,
     openingLog: (urlHint: string) => `브라우저 세션을 열었습니다. 대상: ${urlHint}`,
-    collectingLog: "페이지 구조를 수집하고 회의용 메모를 정리하는 중입니다.",
+    collectingLog: "페이지 구조를 수집하고 회의용 메모를 정리하고 있습니다.",
     reviewingSummary: "OpenClaw가 페이지를 검토하고 결과를 정리하고 있습니다.",
-    failLog: "브라우저 작업이 실패했습니다. 더 구체적인 지시문이나 URL을 제공하세요.",
-    failSummary: "OpenClaw가 작업을 완료하지 못했습니다. 요청을 구체화하거나 URL을 지정하세요.",
+    failLog: "브라우저 작업이 실패했습니다. 요청을 더 구체적으로 쓰거나 URL을 지정해 주세요.",
+    failSummary: "OpenClaw가 작업을 완료하지 못했습니다. 요청을 더 구체적으로 쓰거나 URL을 지정해 주세요.",
     successLog: "작업이 완료되었습니다. 요약과 메모를 회의실에서 확인할 수 있습니다.",
-    successSummary: "OpenClaw 조사가 끝났습니다. 최신 브라우저 결과를 검토할 수 있습니다."
+    successSummary: "OpenClaw 조사가 완료되었습니다. 최신 브라우저 결과를 확인할 수 있습니다."
   },
   en: {
     title: "OpenClaw Browser Task",
@@ -155,9 +186,9 @@ const OPENCLAW_COPY = {
     successSummary: string;
   }
 >;
-
 declare global {
   var __openclawMeetingTasks__: Map<string, MeetingTask> | undefined;
+  var __openclawMeetingArtifacts__: Map<string, MeetingTaskArtifacts> | undefined;
 }
 
 function normalizePath(value: string) {
@@ -191,6 +222,13 @@ function getStore() {
     global.__openclawMeetingTasks__ = new Map<string, MeetingTask>();
   }
   return global.__openclawMeetingTasks__;
+}
+
+function getArtifactsStore() {
+  if (!global.__openclawMeetingArtifacts__) {
+    global.__openclawMeetingArtifacts__ = new Map<string, MeetingTaskArtifacts>();
+  }
+  return global.__openclawMeetingArtifacts__;
 }
 
 function toStatus(value: string | undefined): MeetingTaskStatus {
@@ -333,6 +371,11 @@ function updateTask(taskId: string, update: Partial<MeetingTask>) {
   Object.assign(task, update);
   task.updatedAt = new Date().toISOString();
   task.screenshot = buildScreenshot(task);
+
+  const artifacts = getArtifactsStore().get(taskId);
+  if (artifacts) {
+    artifacts.screenshot = task.screenshot;
+  }
 }
 
 function runMockLifecycle(taskId: string) {
@@ -388,7 +431,146 @@ function runMockLifecycle(taskId: string) {
   }, 3400);
 }
 
-async function requestRemote<T>(path: string, init?: RequestInit) {
+function buildGatewayResearchPrompt(task: MeetingTask) {
+  const locale = task.locale ?? DEFAULT_LOCALE;
+  const target = task.url
+    ? locale === "ko"
+      ? `먼저 이 URL을 직접 확인하세요: ${task.url}`
+      : `Directly inspect this URL first: ${task.url}`
+    : locale === "ko"
+      ? "필요하면 검색이나 브라우저 확인을 사용해 관련 페이지를 직접 검토하세요."
+      : "Use browser/search when needed to inspect relevant pages directly.";
+
+  return locale === "ko"
+    ? [
+        "너는 OpenClaw 조사 에이전트다.",
+        target,
+        "요청을 실제로 확인한 사실만 바탕으로 정리해라.",
+        "응답 형식:",
+        "요약: 2문장 이내",
+        "메모:",
+        "- 사실 1",
+        "- 사실 2",
+        "- 사실 3",
+        "확인되지 않은 내용은 추측하지 마라."
+      ].join("\n")
+    : [
+        "You are an OpenClaw research agent.",
+        target,
+        "Verify the request directly and only report confirmed findings.",
+        "Reply format:",
+        "Summary: within 2 sentences",
+        "Notes:",
+        "- Fact 1",
+        "- Fact 2",
+        "- Fact 3",
+        "Do not guess when something is unverified."
+      ].join("\n");
+}
+
+function parseGatewayResearchResult(text: string, locale: AppLocale = DEFAULT_LOCALE) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const cleaned = lines
+    .map((line) => line.replace(/^[-*•]+\s*/, "").trim())
+    .filter(Boolean);
+
+  const summaryLine = cleaned.find((line) => /^(요약|summary)\s*[:：]/i.test(line));
+  const summary = summaryLine
+    ? summaryLine.replace(/^(요약|summary)\s*[:：]\s*/i, "").trim()
+    : cleaned.find((line) => !/^(메모|notes)\s*[:：]?/i.test(line)) ||
+      (locale === "ko"
+        ? "조사는 완료되었지만 요약 문장을 받지 못했습니다."
+        : "Research completed, but no summary was returned.");
+
+  const notes = cleaned
+    .map((line) => line.replace(/^(메모|notes)\s*[:：]\s*/i, "").trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^(요약|summary)\s*[:：]?/i.test(line))
+    .filter((line) => !/^(메모|notes)$/i.test(line))
+    .filter((line) => line !== summary)
+    .slice(0, 6);
+
+  return {
+    summary,
+    notes: notes.length > 0 ? notes : [summary]
+  };
+}
+async function runGatewayResearchLifecycle(taskId: string) {
+  const task = getStore().get(taskId);
+  if (!task) {
+    return;
+  }
+
+  const locale = task.locale ?? DEFAULT_LOCALE;
+  const copy = OPENCLAW_COPY[locale];
+  const agentsById = getAgentsById(locale);
+  const urlHint = task.url || copy.noUrl;
+  const agentName = agentsById[task.agentId as keyof typeof agentsById]?.name || task.agentId;
+
+  updateTask(taskId, {
+    status: "running",
+    summary: copy.openingSummary(agentName)
+  });
+  appendLog(taskId, { level: "info", message: copy.openingLog(urlHint) });
+  appendLog(taskId, { level: "info", message: copy.collectingLog });
+  updateTask(taskId, {
+    status: "running",
+    summary: copy.reviewingSummary
+  });
+
+  try {
+    const result = await callOpenClawMeetingChat({
+      agentId: task.agentId,
+      phase: "analysis",
+      systemPrompt: buildGatewayResearchPrompt(task),
+      message: task.instruction,
+      history: [],
+      locale,
+      mode: "meeting"
+    });
+
+    const parsed = parseGatewayResearchResult(result.text, locale);
+    updateTask(taskId, {
+      status: "succeeded",
+      summary: parsed.summary
+    });
+    getArtifactsStore().set(taskId, {
+      taskId,
+      screenshot: getStore().get(taskId)?.screenshot,
+      notes: parsed.notes
+    });
+    appendLog(taskId, { level: "success", message: copy.successLog });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : copy.failLog;
+    updateTask(taskId, {
+      status: "failed",
+      summary: copy.failSummary
+    });
+    getArtifactsStore().set(taskId, {
+      taskId,
+      screenshot: getStore().get(taskId)?.screenshot,
+      notes: [message]
+    });
+    appendLog(taskId, { level: "error", message });
+  }
+}
+
+function createOpenClawRequestError(statusCode: number, text: string) {
+  const error = new Error(text ? `OpenClaw error ${statusCode}: ${text}` : `OpenClaw error ${statusCode}.`) as OpenClawRequestError;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function shouldFallbackToResponses(error: unknown) {
+  const statusCode = (error as OpenClawRequestError | undefined)?.statusCode;
+  return statusCode === 404 || statusCode === 405 || statusCode === 501;
+}
+
+async function requestRemoteRaw(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
 
   for (const [key, value] of Object.entries(OPENCLAW_EXTRA_HEADERS)) {
@@ -403,18 +585,33 @@ async function requestRemote<T>(path: string, init?: RequestInit) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${OPENCLAW_BASE_URL}${path}`, {
+  return fetch(`${OPENCLAW_BASE_URL}${path}`, {
     ...init,
     headers,
     cache: "no-store"
   });
+}
+
+async function requestRemote<T>(path: string, init?: RequestInit) {
+  const response = await requestRemoteRaw(path, init);
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`OpenClaw error ${response.status}: ${text}`);
+    throw createOpenClawRequestError(response.status, text);
   }
 
-  return (await response.json()) as T;
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  const text = await response.text().catch(() => "");
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
+function asAssistantLine(item: ChatHistoryItem, locale: AppLocale = DEFAULT_LOCALE) {
+  const agentsById = getAgentsById(locale);
+  const agentName = item.agent ? agentsById[item.agent as keyof typeof agentsById]?.name : undefined;
+  return agentName ? `${agentName}: ${item.content}` : item.content;
 }
 
 function normalizeChatResult(payload: RemoteChatPayload): OpenClawMeetingChatResult {
@@ -431,6 +628,82 @@ function normalizeChatResult(payload: RemoteChatPayload): OpenClawMeetingChatRes
   };
 }
 
+function extractResponsesOutputText(payload: RemoteResponsesPayload) {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  for (const item of payload.output ?? []) {
+    if (item.type !== "message" || !Array.isArray(item.content)) {
+      continue;
+    }
+
+    const text = item.content
+      .filter((chunk) => chunk.type === "output_text" && typeof chunk.text === "string")
+      .map((chunk) => chunk.text)
+      .join("")
+      .trim();
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+function toResponsesInput(args: OpenClawMeetingChatArgs) {
+  const locale = args.locale ?? DEFAULT_LOCALE;
+  return [
+    { role: "system", content: args.systemPrompt },
+    ...args.history.map((item) =>
+      item.role === "user"
+        ? { role: "user", content: item.content }
+        : { role: "assistant", content: asAssistantLine(item, locale) }
+    ),
+    { role: "user", content: args.message }
+  ];
+}
+
+function normalizeResponsesResult(payload: RemoteResponsesPayload): OpenClawMeetingChatResult {
+  const text = extractResponsesOutputText(payload);
+  if (!text) {
+    throw new Error("OpenClaw responses endpoint returned an empty response.");
+  }
+
+  return {
+    text,
+    provider: "openclaw",
+    model: payload.model || OPENCLAW_MODEL
+  };
+}
+
+function toChatCompletionsMessages(args: OpenClawMeetingChatArgs) {
+  const locale = args.locale ?? DEFAULT_LOCALE;
+  return [
+    { role: "system", content: args.systemPrompt },
+    ...args.history.map((item) =>
+      item.role === "user"
+        ? { role: "user", content: item.content }
+        : { role: "assistant", content: asAssistantLine(item, locale) }
+    ),
+    { role: "user", content: args.message }
+  ];
+}
+
+function normalizeChatCompletionsResult(payload: RemoteChatCompletionsPayload): OpenClawMeetingChatResult {
+  const text = payload.choices?.[0]?.message?.content?.trim() || "";
+  if (!text) {
+    throw new Error("OpenClaw chat completions endpoint returned an empty response.");
+  }
+
+  return {
+    text,
+    provider: "openclaw",
+    model: payload.model || OPENCLAW_MODEL
+  };
+}
+
 export function isOpenClawRemoteConfigured() {
   return Boolean(OPENCLAW_BASE_URL);
 }
@@ -444,20 +717,56 @@ export async function callOpenClawMeetingChat(args: OpenClawMeetingChatArgs): Pr
     throw new Error("OPENCLAW_BASE_URL is not set.");
   }
 
-  const payload = await requestRemote<RemoteChatPayload>(OPENCLAW_CHAT_PATH, {
+  try {
+    const payload = await requestRemote<RemoteChatPayload>(OPENCLAW_CHAT_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        agentId: args.agentId,
+        phase: args.phase,
+        systemPrompt: args.systemPrompt,
+        message: args.message,
+        history: args.history,
+        locale: args.locale ?? DEFAULT_LOCALE,
+        mode: args.mode || "meeting"
+      })
+    });
+
+    return normalizeChatResult(payload);
+  } catch (error) {
+    if (!shouldFallbackToResponses(error)) {
+      throw error;
+    }
+  }
+
+  try {
+    const payload = await requestRemote<RemoteChatCompletionsPayload>(OPENCLAW_CHAT_COMPLETIONS_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        model: OPENCLAW_MODEL,
+        messages: toChatCompletionsMessages(args),
+        temperature: 0.4,
+        max_tokens: OPENCLAW_MAX_TOKENS
+      })
+    });
+
+    return normalizeChatCompletionsResult(payload);
+  } catch (error) {
+    if (!shouldFallbackToResponses(error)) {
+      throw error;
+    }
+  }
+
+  const payload = await requestRemote<RemoteResponsesPayload>(OPENCLAW_RESPONSES_PATH, {
     method: "POST",
     body: JSON.stringify({
-      agentId: args.agentId,
-      phase: args.phase,
-      systemPrompt: args.systemPrompt,
-      message: args.message,
-      history: args.history,
-      locale: args.locale ?? DEFAULT_LOCALE,
-      mode: args.mode || "meeting"
+      model: OPENCLAW_MODEL,
+      input: toResponsesInput(args),
+      temperature: 0.4,
+      max_output_tokens: OPENCLAW_MAX_TOKENS
     })
   });
 
-  return normalizeChatResult(payload);
+  return normalizeResponsesResult(payload);
 }
 
 export async function startMeetingTask(args: StartMeetingTaskArgs): Promise<MeetingTask> {
@@ -465,17 +774,23 @@ export async function startMeetingTask(args: StartMeetingTaskArgs): Promise<Meet
   const copy = OPENCLAW_COPY[locale];
 
   if (OPENCLAW_BASE_URL) {
-    const payload = await requestRemote<RemoteTaskPayload>(OPENCLAW_TASKS_PATH, {
-      method: "POST",
-      body: JSON.stringify({ ...args, locale })
-    });
-    return normalizeTask(payload, {
-      agentId: args.agentId,
-      instruction: args.instruction,
-      url: args.url,
-      sessionId: args.sessionId,
-      locale
-    });
+    try {
+      const payload = await requestRemote<RemoteTaskPayload>(OPENCLAW_TASKS_PATH, {
+        method: "POST",
+        body: JSON.stringify({ ...args, locale })
+      });
+      return normalizeTask(payload, {
+        agentId: args.agentId,
+        instruction: args.instruction,
+        url: args.url,
+        sessionId: args.sessionId,
+        locale
+      });
+    } catch (error) {
+      if (!shouldFallbackToResponses(error)) {
+        throw error;
+      }
+    }
   }
 
   const task: MeetingTask = {
@@ -500,11 +815,27 @@ export async function startMeetingTask(args: StartMeetingTaskArgs): Promise<Meet
 
   task.screenshot = buildScreenshot(task);
   getStore().set(task.taskId, task);
-  runMockLifecycle(task.taskId);
+  getArtifactsStore().set(task.taskId, {
+    taskId: task.taskId,
+    screenshot: task.screenshot,
+    notes: task.logs.map((log) => log.message)
+  });
+
+  if (OPENCLAW_BASE_URL) {
+    void runGatewayResearchLifecycle(task.taskId);
+  } else {
+    runMockLifecycle(task.taskId);
+  }
+
   return structuredClone(task);
 }
 
 export async function getMeetingTask(taskId: string): Promise<MeetingTask | undefined> {
+  const localTask = getStore().get(taskId);
+  if (localTask) {
+    return structuredClone(localTask);
+  }
+
   if (OPENCLAW_BASE_URL) {
     const payload = await requestRemote<RemoteTaskPayload>(resolvePath(OPENCLAW_TASK_DETAIL_PATH, taskId));
     return normalizeTask(payload, {
@@ -512,11 +843,25 @@ export async function getMeetingTask(taskId: string): Promise<MeetingTask | unde
     });
   }
 
-  const task = getStore().get(taskId);
-  return task ? structuredClone(task) : undefined;
+  return undefined;
 }
 
 export async function getMeetingTaskArtifacts(taskId: string): Promise<MeetingTaskArtifacts | undefined> {
+  const task = getStore().get(taskId);
+  if (task) {
+    const artifacts = getArtifactsStore().get(taskId);
+    return artifacts
+      ? structuredClone({
+          ...artifacts,
+          screenshot: artifacts.screenshot || task.screenshot
+        })
+      : {
+          taskId: task.taskId,
+          screenshot: task.screenshot,
+          notes: task.logs.map((log) => log.message)
+        };
+  }
+
   if (OPENCLAW_BASE_URL) {
     const payload = await requestRemote<{
       screenshot?: string;
@@ -527,16 +872,7 @@ export async function getMeetingTaskArtifacts(taskId: string): Promise<MeetingTa
     return normalizeArtifacts(taskId, payload);
   }
 
-  const task = getStore().get(taskId);
-  if (!task) {
-    return undefined;
-  }
-
-  return {
-    taskId: task.taskId,
-    screenshot: task.screenshot,
-    notes: task.logs.map((log) => log.message)
-  };
+  return undefined;
 }
 
 export async function runMeetingResearchTask(

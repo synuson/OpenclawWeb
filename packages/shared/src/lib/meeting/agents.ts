@@ -39,7 +39,7 @@ const AGENT_COPY: Record<AppLocale, Record<AgentId, AgentCopyEntry>> = {
       name: "서윤",
       title: "진행자",
       mentionAliases: ["assistant", "moderator", "mc", "seoyun", "서윤", "진행자"],
-      toneStyle: "차분하고 명확하게 결론부터 말하며, 필요한 맥락만 짧게 덧붙입니다.",
+      toneStyle: "차분하고 또렷하게 결론을 먼저 말한 뒤, 필요한 맥락만 짧게 덧붙입니다.",
       avatarVariant: "aurora",
       avatarPreset: "core"
     },
@@ -102,7 +102,7 @@ function buildPersonaPrompt(agentId: AgentId, locale: AppLocale, persona: AgentP
         `현재 화면에서 당신의 표시 이름은 ${persona.displayName}입니다.`,
         `${agentId === "assistant" ? "진행자" : "분석가"} 역할은 유지하되, 아래 말투 지침을 따르세요.`,
         `말투: ${persona.toneStyle}`,
-        "메인 채팅에서는 내부 시스템이나 툴 이름을 드러내지 말고, 필요한 조사 후에도 자연스럽게 답하세요."
+        "메인 채팅에서는 도구 이름이나 내부 시스템 설명을 드러내지 말고, 필요한 조사가 있으면 자연스럽게 반영하세요."
       ].join("\n")
     : [
         `In this interface your visible name is ${persona.displayName}.`,

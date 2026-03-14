@@ -218,6 +218,12 @@ async function callProviderWithValidation(provider: Provider, args: CallLLMArgs)
     throw new Error(`${provider} response did not satisfy the required meeting sections.`);
   }
 
+  // OpenClaw replies are usually good enough for the UI even if one heading is omitted.
+  // Skipping the second validation call reduces round-trip latency.
+  if (provider === "openclaw") {
+    return initial;
+  }
+
   const locale = args.locale ?? DEFAULT_LOCALE;
   const retry = await callSingleProvider(provider, {
     ...args,

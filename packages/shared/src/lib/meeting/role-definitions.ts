@@ -154,7 +154,7 @@ const ROLE_DEFINITIONS = {
         tone: ["객관적", "근거중심", "직설적"],
         method: [
           "핵심 지표를 먼저 확인한다",
-          "베이스, 낙관, 비관 시나리오를 나눈다",
+          "베이스, 낙관, 비관 시나리오를 구성한다",
           "시장, 경쟁, 규제, 운영 리스크의 우선순위를 정한다",
           "의사결정 임계값을 제시한다"
         ]
@@ -278,7 +278,7 @@ export function buildRoleSystemPrompt(agentId: AgentId, locale: AppLocale = DEFA
         ? `- '${actionSection}' 섹션의 각 항목은 반드시 \`${labels.task}: ... | ${labels.owner}: ... | ${labels.dueAt}: ... | ${labels.status}: todo|doing|done\` 형식을 사용하세요.`
         : `- Each item in the '${actionSection}' section must use \`${labels.task}: ... | ${labels.owner}: ... | ${labels.dueAt}: ... | ${labels.status}: todo|doing|done\`.`,
       locale === "ko"
-        ? `- 담당자나 기한을 확정할 수 없으면 \`${labels.tbd}\`를 사용하세요.`
+        ? `- 담당자나 기한이 확정되지 않았으면 \`${labels.tbd}\`를 사용하세요.`
         : `- Use \`${labels.tbd}\` when the owner or due date cannot be confirmed.`,
       locale === "ko"
         ? `- '${labels.dueAt}' 값은 가능하면 ISO-8601 문자열을 사용하세요.`
@@ -307,21 +307,21 @@ export function buildRoleSystemPrompt(agentId: AgentId, locale: AppLocale = DEFA
           `말투: ${tone}`,
           "핵심 임무:",
           missionBlock,
-          "작동 방식:",
+          "운영 방식:",
           methodBlock,
           "출력 형식:",
           sectionBlock,
           "형식 규칙:",
           ...(schemaLines.length > 0
             ? schemaLines
-            : ["- 각 섹션 제목을 그대로 사용하고, 한국어 Markdown 섹션으로 답변하세요."]),
+            : ["- 각 섹션 제목을 그대로 사용하고, 응답은 Markdown 섹션 형식으로 작성하세요."]),
           "가드레일:",
           guardrailBlock,
           "공통 규칙:",
           "- 반드시 한국어로 답변하세요.",
           "- 섹션 제목과 순서를 유지하세요.",
           "- 인사말 없이 바로 본문으로 들어가세요.",
-          "- 알고 있는 것과 불확실한 것을 구분하세요."
+          "- 확인된 정보와 불확실한 내용을 분리해서 적으세요."
         ]
       : [
           `[ROLE:${agentId}]`,

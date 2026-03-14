@@ -17,6 +17,7 @@ import type {
   AutoSpeakMode,
   Capabilities,
   ChatHistoryItem,
+  OpenClawConnectionProbe,
   MeetingMinutes,
   MeetingRoundResponse,
   MeetingSessionRecord,
@@ -102,7 +103,7 @@ const PERSONA_AVATAR_THEMES: Record<
   }
 > = {
   aurora: {
-    label: { ko: "오로라", en: "Aurora" },
+    label: { ko: "\uC624\uB85C\uB77C", en: "Aurora" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-emerald-200/70 bg-emerald-50 text-ink",
@@ -110,7 +111,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-emerald-300 bg-white"
   },
   graphite: {
-    label: { ko: "그래파이트", en: "Graphite" },
+    label: { ko: "\uADF8\uB798\uD30C\uC774\uD2B8", en: "Graphite" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-slate-200 bg-slate-50 text-ink",
@@ -118,7 +119,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-slate-300 bg-white"
   },
   sunset: {
-    label: { ko: "선셋", en: "Sunset" },
+    label: { ko: "\uC120\uC14B", en: "Sunset" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-amber-200 bg-amber-50 text-ink",
@@ -126,7 +127,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-amber-300 bg-white"
   },
   lagoon: {
-    label: { ko: "라군", en: "Lagoon" },
+    label: { ko: "\uB77C\uAD70", en: "Lagoon" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-cyan-200 bg-cyan-50 text-ink",
@@ -142,16 +143,16 @@ const PERSONA_AVATAR_PRESETS: Record<
   }
 > = {
   core: {
-    label: { ko: "코어", en: "Core" }
+    label: { ko: "\uCF54\uC5B4", en: "Core" }
   },
   orbit: {
-    label: { ko: "오빗", en: "Orbit" }
+    label: { ko: "\uC624\uBE57", en: "Orbit" }
   },
   signal: {
-    label: { ko: "시그널", en: "Signal" }
+    label: { ko: "\uC2DC\uADF8\uB110", en: "Signal" }
   },
   grid: {
-    label: { ko: "그리드", en: "Grid" }
+    label: { ko: "\uADF8\uB9AC\uB4DC", en: "Grid" }
   }
 };
 const MARKET_SESSION_LABELS: Record<AppLocale, Record<Exclude<MarketSessionState, "always">, string>> = {
@@ -180,7 +181,7 @@ function labelForMarketSession(session: MarketSessionState | undefined, locale: 
 function describeMarketSession(session: MarketSessionState | undefined, locale: AppLocale) {
   switch (session) {
     case "closed":
-      return locale === "ko" ? "\uc2dc\uc7a5 \ud734\uc7a5 \u00b7 \ub9c8\uc9c0\ub9c9 \uc885\uac00 \uae30\uc900" : "Market closed 쨌 last close";
+      return locale === "ko" ? "시장 휴장 · 마지막 종가 기준" : "Market closed · last close";
     case "pre":
       return locale === "ko" ? "\uc7a5\uc804 \uc2dc\uc138 \uad6c\uac04" : "Pre-market session";
     case "post":
@@ -213,7 +214,7 @@ function getSnapshotMetaDetail(snapshot: MarketSnapshot | null, locale: AppLocal
     return "";
   }
 
-  return [describeMarketSession(snapshot.session, locale), snapshot.provider].filter(Boolean).join(" 쨌 ");
+  return [describeMarketSession(snapshot.session, locale), snapshot.provider].filter(Boolean).join(" · ");
 }
 
 function getMarketProviderLabel(snapshot: MarketSnapshot | null, copy: ReturnType<typeof getDictionary>) {
@@ -404,56 +405,56 @@ function dockPanelCopy(locale: AppLocale) {
         liveScriptTitle: "\uD68C\uC758 \uB300\uD654",
         liveScriptDescription: "\uBA54\uC778 \uBC1C\uD45C \uD750\uB984\uACFC \uC2E4\uC81C \uCC44\uD305\uC744 \uD55C \uC2A4\uD2B8\uB9BC\uC73C\uB85C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
         autoRouting: "AI \uC790\uB3D9 \uB77C\uC6B0\uD305",
-        userCameraEyebrow: "내 카메라",
-        userCameraTitle: "내 화면",
-        userCameraDescription: "회의 화면 우하단에 고정되는 로컬 카메라 화면입니다.",
-        dockEyebrow: "도킹 패널",
-        dockTitle: "편집 / 회의록 / 조사기록",
-        dockDescription: "브라우저 개발자 도구처럼 오른쪽에 붙는 보조 패널입니다.",
+        userCameraEyebrow: "\uB0B4 \uCE74\uBA54\uB77C",
+        userCameraTitle: "\uB85C\uCEEC \uD654\uBA74",
+        userCameraDescription: "\uB0B4 \uCE74\uBA54\uB77C \uBBF8\uB9AC\uBCF4\uAE30\uB294 \uC624\uB978\uCABD \uC544\uB798\uC5D0 \uACE0\uC815\uB429\uB2C8\uB2E4.",
+        dockEyebrow: "\uB3C4\uD0B9 \uD328\uB110",
+        dockTitle: "\uD3B8\uC9D1 / \uD68C\uC758\uB85D / \uC870\uC0AC",
+        dockDescription: "\uC624\uB978\uCABD \uD328\uB110\uC5D0\uC11C AI \uD398\uB974\uC18C\uB098, \uD68C\uC758\uB85D, \uC870\uC0AC \uACB0\uACFC\uB97C \uBE60\uB974\uAC8C \uD655\uC778\uD569\uB2C8\uB2E4.",
         dockTabs: {
-          session: "편집",
-          minutes: "회의록",
-          research: "조사기록"
+          session: "\uD3B8\uC9D1",
+          minutes: "\uD68C\uC758\uB85D",
+          research: "\uC870\uC0AC\uAE30\uB85D"
         } satisfies Record<DockTab, string>,
-        dockOpen: "패널 열림",
-        dockClosed: "패널 닫힘",
-        openDock: "열기",
-        closeDock: "닫기",
-        personaEyebrow: "AI 페르소나",
-        personaTitle: "이름 / 말투 / 아바타",
-        personaDescription: "서윤과 이안의 표시 이름, 말투, 아바타 프리셋과 카드 테마를 조정합니다.",
-        displayNameLabel: "이름",
-        toneLabel: "말투",
-        avatarLabel: "아바타",
-        avatarToneLabel: "카드 테마",
-        resetPersona: "기본값 복원",
-        sessionActivity: "편집 로그",
-        sessionEmpty: "아직 편집 기록이 없습니다.",
-        sessionWorkspace: "현재 시장",
-        sessionParticipants: "참여 화면",
-        sessionSavedAt: "마지막 회의록",
-        localeLabel: "언어",
-        openSettings: "설정",
-        minutesHistory: "저장된 회의록",
-        researchNotes: "조사 메모",
-        researchHistory: "조사 히스토리",
-        researchStatus: "조사 상태",
-        marketHubEyebrow: "금융 허브",
-        marketHubDescription: "시장 선택은 왼쪽, 주요 판단은 오른쪽에 집중합니다.",
+        dockOpen: "\uD328\uB110 \uC5F4\uB9BC",
+        dockClosed: "\uD328\uB110 \uB2EB\uD798",
+        openDock: "\uC5F4\uAE30",
+        closeDock: "\uC811\uAE30",
+        personaEyebrow: "AI \uD398\uB974\uC18C\uB098 \uD3B8\uC9D1",
+        personaTitle: "\uC774\uB984 / \uB9D0\uD22C / \uCE74\uB4DC",
+        personaDescription: "\uC11C\uC724\uACFC \uC774\uC548\uC758 \uD45C\uC2DC \uC774\uB984, \uB9D0\uD22C, \uC544\uBC14\uD0C0 \uD504\uB9AC\uC14B, \uCE74\uB4DC \uD14C\uB9C8\uB97C \uC870\uC815\uD569\uB2C8\uB2E4.",
+        displayNameLabel: "\uC774\uB984",
+        toneLabel: "\uB9D0\uD22C",
+        avatarLabel: "\uC544\uBC14\uD0C0",
+        avatarToneLabel: "\uCE74\uB4DC \uD14C\uB9C8",
+        resetPersona: "\uCD08\uAE30\uD654",
+        sessionActivity: "\uD3B8\uC9D1 \uB85C\uADF8",
+        sessionEmpty: "\uC544\uC9C1 \uD3B8\uC9D1 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
+        sessionWorkspace: "\uD65C\uC131 \uC2DC\uC7A5",
+        sessionParticipants: "\uD45C\uC2DC \uC778\uC6D0",
+        sessionSavedAt: "\uCD5C\uADFC \uD68C\uC758\uB85D",
+        localeLabel: "\uC5B8\uC5B4",
+        openSettings: "\uC124\uC815",
+        minutesHistory: "\uC800\uC7A5\uB41C \uD68C\uC758\uB85D",
+        researchNotes: "\uC870\uC0AC \uBA54\uBAA8",
+        researchHistory: "\uC870\uC0AC \uAE30\uB85D",
+        researchStatus: "\uC870\uC0AC \uC0C1\uD0DC",
+        marketHubEyebrow: "\uC2DC\uC7A5 \uD5C8\uBE0C",
+        marketHubDescription: "\uC67C\uCABD\uC5D0\uC11C \uC2DC\uC7A5\uC744 \uBCF4\uACE0, \uC624\uB978\uCABD\uC5D0\uC11C \uACB0\uC815\uACFC \uAE30\uB85D\uC744 \uC774\uC5B4\uAC11\uB2C8\uB2E4.",
         meetingOverviewTitle: "Workspace"
       }
     : {
-        stageNotice: "\uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uC801\uD569\uD55C AI\uAC00 \uBA3C\uC800 \uB2F5\uD558\uACE0, \uD544\uC694\uD558\uBA74 \uC870\uC0AC\uAE4C\uC9C0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4.",
-        liveScriptEyebrow: "\uB77C\uC774\uBE0C \uC2A4\uD06C\uB9BD\uD2B8",
-        liveScriptTitle: "\uD68C\uC758 \uB300\uD654",
-        liveScriptDescription: "\uBA54\uC778 \uBC1C\uD45C \uD750\uB984\uACFC \uC2E4\uC81C \uCC44\uD305\uC744 \uD55C \uC2A4\uD2B8\uB9BC\uC73C\uB85C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
-        autoRouting: "AI \uC790\uB3D9 \uB77C\uC6B0\uD305",
+        stageNotice: "When you send a message, the right AI responds first and research follows if needed.",
+        liveScriptEyebrow: "Live script",
+        liveScriptTitle: "Meeting transcript",
+        liveScriptDescription: "Keep the main speaking flow and the actual chat in one stream.",
+        autoRouting: "AI auto routing",
         userCameraEyebrow: "My camera",
         userCameraTitle: "Local view",
-        userCameraDescription: "Your local camera stays pinned in the lower-right area.",
+        userCameraDescription: "Your local camera preview stays pinned in the lower-right area.",
         dockEyebrow: "Docked panel",
         dockTitle: "Edit / Minutes / Research",
-        dockDescription: "A right dock styled like a browser debugger.",
+        dockDescription: "Use the right dock to adjust personas, review minutes, and inspect research.",
         dockTabs: {
           session: "Edit",
           minutes: "Minutes",
@@ -464,7 +465,7 @@ function dockPanelCopy(locale: AppLocale) {
         openDock: "Open",
         closeDock: "Collapse",
         personaEyebrow: "AI persona",
-        personaTitle: "Name / tone / avatar",
+        personaTitle: "Name / tone / card",
         personaDescription: "Change the visible name, tone, avatar preset, and card theme for Seoyun and Ian.",
         displayNameLabel: "Name",
         toneLabel: "Tone",
@@ -482,7 +483,7 @@ function dockPanelCopy(locale: AppLocale) {
         researchNotes: "Research notes",
         researchHistory: "Research history",
         researchStatus: "Research status",
-        marketHubEyebrow: "Finance hub",
+        marketHubEyebrow: "Market hub",
         marketHubDescription: "Keep market selection on the left and decisions on the right.",
         meetingOverviewTitle: "Workspace"
       };
@@ -816,7 +817,7 @@ function SnapshotOverview({
   const priceChangeDetail = heroQuote
     ? `${formatSignedPercent(heroQuote.changePercent)} · ${formatSignedNumber(heroQuote.change, heroQuote.currency === "KRW" ? 0 : 2, intlLocale)}`
     : getSnapshotMetaDetail(snapshot, locale) || providerLabel;
-  const normalizedPriceChangeDetail = priceChangeDetail.replace("쨌", "·");
+  const normalizedPriceChangeDetail = priceChangeDetail;
   return (
     <div className={cn("mb-4 overflow-hidden rounded-[30px] border border-ink/10 p-6 text-white shadow-panel", heroAccent)}>
       <div className="grid gap-4">
@@ -1633,9 +1634,7 @@ function PersonaEditorCard({
                 <div className="mx-auto mb-2 flex justify-center">
                   <AgentAvatarBadge name={agent.name} preset={preset as AgentAvatarPreset} themeClass={theme.avatarClass} size="sm" />
                 </div>
-                <div className="text-[10px] font-semibold tracking-[0.14em] text-ink/72">
-                  {option.label[locale]}
-                </div>
+                <div className="text-[10px] font-semibold tracking-[0.14em] text-ink/72">{option.label[locale]}</div>
               </button>
             ))}
           </div>
@@ -1644,7 +1643,7 @@ function PersonaEditorCard({
           <div className="flex items-center justify-between gap-2">
             <span>{panelCopy.avatarToneLabel}</span>
             <span className="text-[10px] font-medium normal-case tracking-normal text-mist/80">
-              {locale === "ko" ? "카드 색감" : "Card mood"}
+              {locale === "ko" ? "\uCE74\uB4DC \uC0C9\uAC10" : "Card mood"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1678,11 +1677,15 @@ function SessionDockPanel({
   timeline,
   activeTabLabel,
   latestSavedAt,
+  capabilities,
+  openClawProbe,
+  isTestingOpenClaw,
   personas,
   onPersonaChange,
   onPersonaReset,
   settingsHref,
-  onLocaleChange
+  onLocaleChange,
+  onTestOpenClaw
 }: {
   copy: MeetingCopy;
   locale: AppLocale;
@@ -1690,11 +1693,15 @@ function SessionDockPanel({
   timeline: MeetingTimelineItem[];
   activeTabLabel: string;
   latestSavedAt: string;
+  capabilities: Capabilities | null;
+  openClawProbe: OpenClawConnectionProbe | null;
+  isTestingOpenClaw: boolean;
   personas: AgentPersonaOverrides;
   onPersonaChange: (agentId: AgentId, patch: Partial<NonNullable<AgentPersonaOverrides[AgentId]>>) => void;
   onPersonaReset: (agentId: AgentId) => void;
   settingsHref?: string | null;
   onLocaleChange: (nextLocale: AppLocale) => void;
+  onTestOpenClaw: () => void;
 }) {
   const panelCopy = dockPanelCopy(locale);
   const [activePersonaId, setActivePersonaId] = useState<AgentId>(() => agents[0]?.id ?? "assistant");
@@ -1707,6 +1714,75 @@ function SessionDockPanel({
 
   const activePersonaAgent = agents.find((agent) => agent.id === activePersonaId) ?? agents[0];
   const activePersonaIndex = activePersonaAgent ? agents.findIndex((agent) => agent.id === activePersonaAgent.id) : 0;
+  const openClawStatusLabel = !capabilities?.openclawRemote
+    ? locale === "ko"
+      ? "\uBBF8\uC124\uC815"
+      : "Not configured"
+    : openClawProbe?.status === "reachable"
+      ? locale === "ko"
+        ? "\uC5F0\uACB0 \uD655\uC778\uB428"
+        : "Connected"
+      : openClawProbe?.status === "unreachable"
+        ? locale === "ko"
+          ? "\uC5F0\uACB0 \uC2E4\uD328"
+          : "Connection failed"
+        : locale === "ko"
+          ? "\uC124\uC815\uB428"
+          : "Configured";
+  const openClawStatusToneClass = !capabilities?.openclawRemote
+    ? "border-ink/10 bg-white text-mist"
+    : openClawProbe?.status === "reachable"
+      ? "border-emerald-200 bg-emerald-50 text-ink"
+      : openClawProbe?.status === "unreachable"
+        ? "border-rose-200 bg-rose-50 text-ink"
+        : "border-cobalt/20 bg-cobalt/8 text-ink";
+  const openClawDescription = !capabilities?.openclawRemote
+    ? locale === "ko"
+      ? ".env.local\uC5D0 OPENCLAW_BASE_URL\uACFC \uD544\uC694\uD558\uBA74 OPENCLAW_API_KEY\uB97C \uB123\uC73C\uBA74 \uB429\uB2C8\uB2E4."
+      : "Add OPENCLAW_BASE_URL and, if needed, OPENCLAW_API_KEY to .env.local."
+    : openClawProbe?.status === "reachable"
+      ? locale === "ko"
+        ? "OpenClaw chat \uB610\uB294 health \uC751\uB2F5\uC774 \uD655\uC778\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
+        : "The OpenClaw chat or health endpoint responded successfully."
+      : openClawProbe?.status === "unreachable"
+        ? locale === "ko"
+          ? "OpenClaw\uAC00 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0\uB9CC \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC8FC\uC18C, \uD1A0\uD070, /chat \uB610\uB294 /health\uB97C \uD655\uC778\uD558\uC138\uC694."
+          : "OpenClaw is configured, but the app could not get a response. Check the base URL, token, and /chat or /health endpoint."
+        : locale === "ko"
+          ? "OpenClaw\uB294 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0\uB9CC \uC544\uC9C1 \uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB97C \uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
+          : "OpenClaw is configured, but the connection has not been tested yet.";
+  const openClawProbeDetail = openClawProbe?.message;
+  const openClawBaseUrl = openClawProbe?.baseUrl || (capabilities?.openclawRemote
+    ? locale === "ko"
+      ? "\uD658\uACBD \uBCC0\uC218\uC5D0 \uC124\uC815\uB428"
+      : "Configured in the environment"
+    : locale === "ko"
+      ? "OPENCLAW_BASE_URL \uC5C6\uC74C"
+      : "OPENCLAW_BASE_URL not set");
+  const openClawPathSummary = openClawProbe
+    ? `${openClawProbe.chatPath} / ${openClawProbe.tasksPath}`
+    : locale === "ko"
+      ? "/chat, /tasks \uAE30\uBCF8 \uACBD\uB85C"
+      : "/chat, /tasks default paths";
+  const openClawCheckedLabel = openClawProbe?.checkedAt
+    ? new Date(openClawProbe.checkedAt).toLocaleString(copy.app.dateLocale)
+    : locale === "ko"
+      ? "\uC544\uC9C1 \uD655\uC778 \uC804"
+      : "Not tested yet";
+  const openClawMeetingLabel = capabilities?.openclawChat
+    ? locale === "ko"
+      ? "\uD68C\uC758 \uAC00\uB2A5"
+      : "Meeting ready"
+    : locale === "ko"
+      ? "\uD68C\uC758 \uAEBC\uC9D0"
+      : "Meeting off";
+  const openClawResearchLabel = capabilities?.openclawRemote
+    ? locale === "ko"
+      ? "\uC870\uC0AC \uAC00\uB2A5"
+      : "Research ready"
+    : locale === "ko"
+      ? "\uC870\uC0AC \uAEBC\uC9D0"
+      : "Research off";
 
   return (
     <div className="flex flex-col gap-4">
@@ -1736,19 +1812,53 @@ function SessionDockPanel({
             ) : null}
           </div>
         </div>
+        <div className="mt-4 rounded-[20px] border border-ink/10 bg-white/92 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">
+                {locale === "ko" ? "OpenClaw \uC5F0\uACB0" : "OpenClaw Connection"}
+              </div>
+              <div className="text-sm font-semibold text-ink">{openClawStatusLabel}</div>
+              <p className="max-w-[30rem] text-sm leading-6 text-mist">{openClawDescription}</p>
+            </div>
+            <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", openClawStatusToneClass)}>
+              {openClawStatusLabel}
+            </span>
+          </div>
+          {openClawProbeDetail ? <div className="mt-3 text-xs leading-5 text-mist">{openClawProbeDetail}</div> : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge variant="outline">{openClawMeetingLabel}</Badge>
+            <Badge variant="outline">{openClawResearchLabel}</Badge>
+          </div>
+          <div className="mt-3 rounded-[16px] border border-ink/10 bg-white px-3 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mist">Base URL</div>
+            <div className="mt-1 break-all text-sm text-ink/78">{openClawBaseUrl}</div>
+            <div className="mt-1 text-xs text-mist">{openClawPathSummary}</div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-mist">
+              {locale === "ko" ? `\uB9C8\uC9C0\uB9C9 \uD655\uC778 ${openClawCheckedLabel}` : `Last checked ${openClawCheckedLabel}`}
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={onTestOpenClaw} disabled={isTestingOpenClaw}>
+              {isTestingOpenClaw ? (locale === "ko" ? "\uD14C\uC2A4\uD2B8 \uC911..." : "Testing...") : locale === "ko" ? "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8" : "Test connection"}
+            </Button>
+          </div>
+        </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex flex-wrap gap-2 rounded-full border border-ink/10 bg-white/82 p-1">
-            {agents.map((agent, index) => (
+            {agents.map((personaAgent, index) => (
               <button
-                key={agent.id}
+                key={personaAgent.id}
                 type="button"
-                onClick={() => setActivePersonaId(agent.id)}
+                onClick={() => setActivePersonaId(personaAgent.id)}
                 className={cn(
                   "rounded-full px-3 py-2 text-sm font-medium transition",
-                  activePersonaId === agent.id ? "bg-ink text-white shadow-[0_10px_24px_rgba(18,24,36,0.16)]" : "text-mist hover:bg-ink/5 hover:text-ink"
+                  activePersonaId === personaAgent.id
+                    ? "bg-ink text-white shadow-[0_10px_24px_rgba(18,24,36,0.16)]"
+                    : "text-mist hover:bg-ink/5 hover:text-ink"
                 )}
               >
-                {index + 1}. {agent.name}
+                {index + 1}. {personaAgent.name}
               </button>
             ))}
           </div>
@@ -1953,6 +2063,9 @@ function MeetingDebuggerDock({
   timeline,
   activeTabLabel,
   latestSavedAt,
+  capabilities,
+  openClawProbe,
+  isTestingOpenClaw,
   personas,
   selectedTask,
   selectedArtifacts,
@@ -1967,7 +2080,8 @@ function MeetingDebuggerDock({
   onSelectTask,
   onDownloadMinutes,
   onSelectMinutes,
-  onLocaleChange
+  onLocaleChange,
+  onTestOpenClaw
 }: {
   copy: MeetingCopy;
   locale: AppLocale;
@@ -1979,6 +2093,9 @@ function MeetingDebuggerDock({
   timeline: MeetingTimelineItem[];
   activeTabLabel: string;
   latestSavedAt: string;
+  capabilities: Capabilities | null;
+  openClawProbe: OpenClawConnectionProbe | null;
+  isTestingOpenClaw: boolean;
   personas: AgentPersonaOverrides;
   selectedTask: MeetingTask | null;
   selectedArtifacts?: MeetingTaskArtifacts;
@@ -1994,6 +2111,7 @@ function MeetingDebuggerDock({
   onDownloadMinutes: () => void;
   onSelectMinutes: (minutes: MeetingMinutes) => void;
   onLocaleChange: (nextLocale: AppLocale) => void;
+  onTestOpenClaw: () => void;
 }) {
   const panelCopy = dockPanelCopy(locale);
 
@@ -2061,11 +2179,15 @@ function MeetingDebuggerDock({
             timeline={timeline}
             activeTabLabel={activeTabLabel}
             latestSavedAt={latestSavedAt}
+            capabilities={capabilities}
+            openClawProbe={openClawProbe}
+            isTestingOpenClaw={isTestingOpenClaw}
             personas={personas}
             onPersonaChange={onPersonaChange}
             onPersonaReset={onPersonaReset}
             settingsHref={settingsHref}
             onLocaleChange={onLocaleChange}
+            onTestOpenClaw={onTestOpenClaw}
           />
         ) : null}
         {activeTab === "minutes" ? (
@@ -2124,6 +2246,8 @@ export function MeetingRoom({
   const [browserTtsSupported, setBrowserTtsSupported] = useState(false);
   const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [openClawProbe, setOpenClawProbe] = useState<OpenClawConnectionProbe | null>(null);
+  const [isTestingOpenClaw, setIsTestingOpenClaw] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("btc");
   const [btcSnapshot, setBtcSnapshot] = useState<MarketSnapshot | null>(null);
   const [krSnapshot, setKrSnapshot] = useState<MarketSnapshot | null>(null);
@@ -2210,7 +2334,7 @@ export function MeetingRoom({
     browserTtsSupported ? copy.meeting.browserTts : null,
     capabilities?.elevenLabsTts ? copy.meeting.elevenLabs : null,
     copy.meeting.openClawResearch,
-    capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw 회의" : "OpenClaw Meeting") : null
+    capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw \uD68C\uC758" : "OpenClaw Meeting") : null
   ].filter(Boolean) as string[];
   useEffect(() => {
     try {
@@ -2300,7 +2424,58 @@ export function MeetingRoom({
 
   async function refreshCapabilities() {
     const data = await fetchJson<Capabilities>("/api/system/capabilities");
-    startTransition(() => setCapabilities(data));
+    startTransition(() => {
+      setCapabilities(data);
+      if (!data.openclawRemote) {
+        setOpenClawProbe(null);
+      }
+    });
+  }
+
+  async function testOpenClawConnection() {
+    if (isTestingOpenClaw) {
+      return;
+    }
+
+    setIsTestingOpenClaw(true);
+    try {
+      const data = await fetchJson<OpenClawConnectionProbe>("/api/system/openclaw/test", { method: "POST" });
+      startTransition(() => setOpenClawProbe(data));
+      setNotice(
+        data.status === "reachable"
+          ? locale === "ko"
+            ? "OpenClaw 연결을 확인했습니다."
+            : "OpenClaw connection verified."
+          : data.status === "unconfigured"
+            ? locale === "ko"
+              ? "OpenClaw가 아직 설정되지 않았습니다. .env.local에 주소와 토큰을 추가해 주세요."
+              : "OpenClaw is not configured yet. Add it to .env.local."
+            : locale === "ko"
+              ? "OpenClaw 연결 테스트에 실패했습니다. base URL, 토큰, /chat 또는 /health 응답을 확인해 주세요."
+              : "OpenClaw connection test failed. Check the base URL, token, and /chat or /health response."
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "OpenClaw connection test failed.";
+      startTransition(() =>
+        setOpenClawProbe({
+          configured: Boolean(capabilities?.openclawRemote),
+          reachable: false,
+          status: capabilities?.openclawRemote ? "unreachable" : "unconfigured",
+          checkedAt: new Date().toISOString(),
+          baseUrl: "",
+          chatPath: "/chat",
+          tasksPath: "/tasks",
+          message
+        })
+      );
+      setNotice(
+        locale === "ko"
+          ? "OpenClaw 연결 테스트 호출에 실패했습니다."
+          : "Failed to call the OpenClaw connection test."
+      );
+    } finally {
+      setIsTestingOpenClaw(false);
+    }
   }
 
   async function refreshBtc() {
@@ -2725,20 +2900,36 @@ export function MeetingRoom({
       setAgentStatus({ assistant: "idle", analyst: "idle" });
       const nextTimeline = [...baseTimeline, userItem, ...turnItems];
       persistMeeting(data.minutes, nextTimeline, message);
+      const usedFallbackMeetingProvider = capabilities?.openclawChat && data.provider !== "openclaw";
       setNotice(
-        data.meta.usedResearch
+        usedFallbackMeetingProvider
           ? locale === "ko"
-            ? `${agentsById[data.meta.finalSpeakerId].name}??議곗궗 ?댁슜??諛섏쁺???듬??덉뒿?덈떎.`
-            : `${agentsById[data.meta.finalSpeakerId].name} answered with research applied.`
-          : locale === "ko"
-            ? `${agentsById[data.meta.finalSpeakerId].name}???듬????꾩갑?덉뒿?덈떎.`
-            : `${agentsById[data.meta.finalSpeakerId].name} replied.`
+            ? `${agentsById[data.meta.finalSpeakerId].name}이 답변했습니다. OpenClaw 회의를 사용할 수 없어 ${data.provider}로 대신 응답했습니다.`
+            : `${agentsById[data.meta.finalSpeakerId].name} replied. OpenClaw meeting was unavailable, so ${data.provider} was used instead.`
+          : data.meta.usedResearch
+            ? locale === "ko"
+              ? `${agentsById[data.meta.finalSpeakerId].name}이 조사 결과를 반영해 답변했습니다.`
+              : `${agentsById[data.meta.finalSpeakerId].name} answered with research applied.`
+            : locale === "ko"
+              ? `${agentsById[data.meta.finalSpeakerId].name}이 답변했습니다.`
+              : `${agentsById[data.meta.finalSpeakerId].name} replied.`
       );
       void autoplayTurns(data.turns);
     } catch (error) {
-      pushTimeline({ ts: new Date().toISOString(), kind: "message", speakerType: "system", speakerLabel: copy.meeting.systemLabel, badge: "error", text: error instanceof Error ? error.message : copy.meeting.notices.meetingFailed });
+      const errorText = error instanceof Error ? error.message : copy.meeting.notices.meetingFailed;
+      const likelyOpenClawError =
+        Boolean(capabilities?.openclawRemote) &&
+        /(openclaw|\/chat|\/tasks|health|connection|fetch failed|econnrefused|401|403|404|token)/i.test(errorText);
+
+      pushTimeline({ ts: new Date().toISOString(), kind: "message", speakerType: "system", speakerLabel: copy.meeting.systemLabel, badge: "error", text: errorText });
       setAgentStatus({ assistant: "idle", analyst: "idle" });
-      setNotice(copy.meeting.notices.meetingFailed);
+      setNotice(
+        likelyOpenClawError
+          ? locale === "ko"
+            ? "회의 답변 생성에 실패했습니다. OpenClaw base URL, 토큰, /chat 연결 상태를 확인해 주세요."
+            : "Failed to generate the meeting reply. Check the OpenClaw base URL, token, and /chat connectivity."
+          : copy.meeting.notices.meetingFailed
+      );
     } finally {
       setIsSending(false);
       window.setTimeout(() => composerRef.current?.focus(), 0);
@@ -2835,7 +3026,7 @@ export function MeetingRoom({
               <OverviewMetric
                 label={copy.meeting.marketPulse}
                 value={selectedSnapshotStatusLabel}
-                detail={[describeMarketSession(selectedSnapshot?.session, locale), snapshotUpdatedAt].filter(Boolean).join(" 쨌 ")}
+                detail={[describeMarketSession(selectedSnapshot?.session, locale), snapshotUpdatedAt].filter(Boolean).join(" · ")}
                 tone={selectedSnapshot?.status === "live" ? "mint" : selectedSnapshot?.status === "delayed" ? "ember" : "default"}
               />
               <OverviewMetric
@@ -3053,7 +3244,7 @@ export function MeetingRoom({
                   </div>
                 ) : null}
                             <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "\uAE30\uB2A5" : "Capabilities"}</div>
                 <div className="flex flex-wrap gap-2">
                   {availableFeatureLabels.map((label) => (
                     <span
@@ -3103,6 +3294,9 @@ export function MeetingRoom({
             timeline={timeline}
             activeTabLabel={activeTabLabel}
             latestSavedAt={latestSavedAt}
+            capabilities={capabilities}
+            openClawProbe={openClawProbe}
+            isTestingOpenClaw={isTestingOpenClaw}
             personas={personaOverrides}
             selectedTask={selectedTask}
             selectedArtifacts={selectedArtifacts}
@@ -3118,6 +3312,7 @@ export function MeetingRoom({
             onDownloadMinutes={handleDownloadMinutes}
             onSelectMinutes={setMinutes}
             onLocaleChange={handleLocaleChange}
+            onTestOpenClaw={() => void testOpenClawConnection()}
           />
         </div>
       </div>

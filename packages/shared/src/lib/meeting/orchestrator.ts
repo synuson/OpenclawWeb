@@ -169,7 +169,7 @@ function renderHistory(
   }
 
   return history
-    .slice(-8)
+    .slice(-4)
     .map((item) => {
       const speaker =
         item.role === "user"

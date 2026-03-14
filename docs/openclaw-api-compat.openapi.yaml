@@ -1,0 +1,584 @@
+openapi: 3.1.0
+info:
+  title: OpenClaw Compatibility API for OpenClawWEB
+  version: 1.0.0
+  description: |
+    OpenClawWEB 프론트엔드가 현재 기대하는 최소-완성 호환 API 스펙이다.
+    이 스펙대로 구현하면 별도 프론트 수정 없이 OpenClaw 회의 응답과 조사 task를 바로 연결할 수 있다.
+
+    기준:
+    - POST /chat: 회의 응답 생성
+    - POST /tasks: 조사 작업 생성
+    - GET /tasks/{taskId}: 조사 작업 상태 조회
+    - GET /tasks/{taskId}/artifacts: 조사 결과물 조회
+
+    중요 제약:
+    - task status는 queued, running, succeeded, failed만 반환한다.
+    - canceled를 내부에서 쓰더라도 이 API에서는 failed로 매핑한다.
+    - /chat 응답은 반드시 text를 반환한다. reply만 반환하면 현재 프론트는 읽지 않는다.
+servers:
+  - url: /api
+    description: Default API base path
+security:
+  - bearerAuth: []
+tags:
+  - name: chat
+    description: Meeting response generation
+  - name: tasks
+    description: Browser research task lifecycle
+paths:
+  /chat:
+    post:
+      tags: [chat]
+      operationId: createMeetingChat
+      summary: 회의용 단건 응답 생성
+      description: |
+        OpenClawWEB 회의 room이 agent별 응답을 생성할 때 호출한다.
+        systemPrompt, history, locale, mode를 그대로 받아 text를 반환해야 한다.
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              analyst:
+                value:
+                  agentId: analyst
+                  phase: discussion
+                  systemPrompt: 당신은 숫자와 리스크를 먼저 읽는 시장 분석가입니다.
+                  message: 비트코인 상황 요약해줘
+                  history:
+                    - role: user
+                      content: 비트코인 상황 요약해줘
+                  locale: ko
+                  mode: meeting
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                success:
+                  value:
+                    id: chat_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                    session_id: ses_01JPR8Y8W4Q8A9H0K6M2ZP3D1F
+                    text: |
+                      ## 핵심 수치 요약
+                      - BTC 변동성 확대 구간입니다.
+                    provider: openclaw
+                    model: gpt-oauth
+                    created_at: '2026-03-15T01:30:00+09:00'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /tasks:
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: 조사 작업 생성
+      description: |
+        OpenClawWEB 조사 패널이 비동기 브라우저 조사 작업을 시작할 때 호출한다.
+        현재 프론트는 camelCase 요청 형식을 사용한다.
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+            examples:
+              basic:
+                value:
+                  agentId: assistant
+                  instruction: 오늘 비트코인 관련 최신 뉴스 조사
+                  url: https://example.com
+                  sessionId: session_01JPR8Y8W4Q8A9H0K6M2ZP3D1G
+                  locale: ko
+      responses:
+        '201':
+          description: 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreatedResponse'
+              examples:
+                queued:
+                  value:
+                    id: tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                    session_id: session_01JPR8Y8W4Q8A9H0K6M2ZP3D1G
+                    agent_id: assistant
+                    instruction: 오늘 비트코인 관련 최신 뉴스 조사
+                    status: queued
+                    summary: 작업이 생성되었습니다.
+                    updated_at: '2026-03-15T01:31:00+09:00'
+                    links:
+                      self: /api/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                      artifacts: /api/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E/artifacts
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /tasks/{taskId}:
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: 조사 작업 상태 조회
+      description: |
+        현재 프론트는 top-level summary, updated_at, logs, screenshot를 우선적으로 읽는다.
+        progress, result, metrics 같은 richer 필드는 추가로 내려줘도 된다.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStateResponse'
+              examples:
+                running:
+                  value:
+                    id: tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                    title: easypos 전기간 수집
+                    status: running
+                    summary: 월별 처리 중
+                    updated_at: '2026-03-15T01:42:10+09:00'
+                    progress:
+                      percent: 68
+                      step: collecting
+                      message: 월별 처리 중
+                    result:
+                      summary: null
+                      error: null
+                    logs:
+                      - timestamp: '2026-03-15T01:42:10+09:00'
+                        level: info
+                        message: 월별 처리 중
+                    timing:
+                      created_at: '2026-03-15T01:31:00+09:00'
+                      started_at: '2026-03-15T01:31:02+09:00'
+                      updated_at: '2026-03-15T01:42:10+09:00'
+                succeeded:
+                  value:
+                    id: tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                    title: easypos 전기간 수집
+                    status: succeeded
+                    summary: 수집이 완료되었습니다.
+                    updated_at: '2026-03-15T01:52:01+09:00'
+                    result:
+                      summary:
+                        months_processed: 14
+                        rows_total: 490
+                        merged_rows: 3
+                      error: null
+                    logs:
+                      - timestamp: '2026-03-15T01:52:01+09:00'
+                        level: success
+                        message: 수집이 완료되었습니다.
+                    screenshot: https://files.example.com/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E/preview.png
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /tasks/{taskId}/artifacts:
+    get:
+      tags: [tasks]
+      operationId: getTaskArtifacts
+      summary: 조사 결과물 조회
+      description: |
+        현재 프론트는 top-level notes와 screenshot를 사용한다.
+        items 배열은 다운로드 링크 노출이나 외부 확장용으로 함께 제공해도 된다.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskArtifactsResponse'
+              examples:
+                basic:
+                  value:
+                    task_id: tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E
+                    screenshot: https://files.example.com/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E/preview.png
+                    notes:
+                      - report.json 생성 완료
+                      - all_receipts_merged.csv 생성 완료
+                    items:
+                      - name: report.json
+                        type: report
+                        size_bytes: 4210
+                        created_at: '2026-03-15T01:52:01+09:00'
+                        download_url: https://files.example.com/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E/report.json
+                      - name: all_receipts_merged.csv
+                        type: csv
+                        size_bytes: 3194
+                        created_at: '2026-03-15T01:52:01+09:00'
+                        download_url: https://files.example.com/tasks/tsk_01JPR8Y8W4Q8A9H0K6M2ZP3D1E/all_receipts_merged.csv
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 요청 추적용 헤더
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 작업 ID
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: 인증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: 리소스를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: 상태 충돌
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: 서버 오류
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              examples: [BAD_REQUEST, TASK_NOT_FOUND]
+            message:
+              type: string
+              example: invalid input
+            details:
+              type: object
+              additionalProperties: true
+    ChatHistoryItem:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        agent:
+          type: string
+          enum: [assistant, analyst]
+          description: 에이전트 발화일 때만 선택적으로 포함 가능
+    ChatRequest:
+      type: object
+      required: [agentId, systemPrompt, message, history, mode]
+      properties:
+        agentId:
+          type: string
+          enum: [assistant, analyst]
+        phase:
+          type: string
+          enum: [discussion, summary]
+          default: discussion
+        systemPrompt:
+          type: string
+        message:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatHistoryItem'
+        locale:
+          type: string
+          enum: [ko, en]
+          default: ko
+        mode:
+          type: string
+          enum: [meeting]
+          default: meeting
+    Citation:
+      type: object
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+          format: uri
+    ChatResponse:
+      type: object
+      required: [text]
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        text:
+          type: string
+          description: 현재 프론트가 실제로 읽는 응답 본문
+        provider:
+          type: string
+          example: openclaw
+        model:
+          type: string
+          example: gpt-oauth
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        created_at:
+          type: string
+          format: date-time
+    TaskStatus:
+      type: string
+      enum: [queued, running, succeeded, failed]
+      description: canceled는 이 호환 API에서는 failed로 매핑한다.
+    TaskCreateRequest:
+      type: object
+      required: [agentId, instruction]
+      properties:
+        agentId:
+          type: string
+          enum: [assistant, analyst]
+        instruction:
+          type: string
+        url:
+          type: string
+          format: uri
+        sessionId:
+          type: string
+        locale:
+          type: string
+          enum: [ko, en]
+          default: ko
+    TaskLinks:
+      type: object
+      properties:
+        self:
+          type: string
+        artifacts:
+          type: string
+    TaskLog:
+      type: object
+      required: [message]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        ts:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [info, warning, error, success]
+          default: info
+        message:
+          type: string
+    TaskCreatedResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        agent_id:
+          type: string
+        instruction:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        summary:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        links:
+          $ref: '#/components/schemas/TaskLinks'
+    TaskProgress:
+      type: object
+      properties:
+        percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        step:
+          type: string
+        message:
+          type: string
+    TaskResult:
+      type: object
+      properties:
+        summary:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        error:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+    TaskTiming:
+      type: object
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    TaskMetrics:
+      type: object
+      additionalProperties: true
+    TaskStateResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        summary:
+          type: string
+          description: 현재 프론트가 우선적으로 읽는 top-level 요약
+        updated_at:
+          type: string
+          format: date-time
+          description: 현재 프론트가 우선적으로 읽는 top-level 갱신 시각
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskLog'
+        screenshot:
+          type: string
+          format: uri
+        progress:
+          $ref: '#/components/schemas/TaskProgress'
+        result:
+          $ref: '#/components/schemas/TaskResult'
+        timing:
+          $ref: '#/components/schemas/TaskTiming'
+        metrics:
+          $ref: '#/components/schemas/TaskMetrics'
+        logs_tail:
+          type: array
+          items:
+            type: string
+    ArtifactItem:
+      type: object
+      required: [name, type, download_url]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          example: report
+        size_bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+          format: uri
+    TaskArtifactsResponse:
+      type: object
+      required: [task_id]
+      properties:
+        task_id:
+          type: string
+        screenshot:
+          type: string
+          format: uri
+          description: 현재 프론트가 직접 읽는 스크린샷 URL
+        notes:
+          type: array
+          description: 현재 프론트가 직접 읽는 노트 목록
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactItem'
