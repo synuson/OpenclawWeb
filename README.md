@@ -7,52 +7,53 @@ OpenClawWEB은 웹에서 AI 에이전트 회의, 음성 입력/출력, 회의록
 - 웹 버전을 직접 실행해 보기
 - 자기 OpenClaw를 연결해서 실제 회의 답변을 받아 보기
 
-## 이 PC에 먼저 설치되어 있어야 하는 것
+## 가장 쉬운 설치 순서
 
-### 필수
-
-1. Git  
-   저장소를 내려받을 때 필요합니다.
-2. Node.js 20 이상  
-   이 프로젝트의 웹 앱을 실행할 때 필요합니다. `Node.js 22 LTS`를 권장합니다.
-3. npm  
-   Node.js를 설치하면 같이 설치됩니다.
-4. Chrome 또는 Edge  
-   브라우저 STT/TTS와 마이크 사용 확인이 가장 쉽습니다.
-
-### 선택
-
-1. Python 3  
-   로컬 OpenClaw 백엔드 스텁이나 데스크톱 보조 기능을 쓸 때만 필요합니다.
-2. Playwright Chromium  
-   로컬 OpenClaw 백엔드 스텁에서 브라우저 자동화를 쓸 때 필요합니다. 자동 설치 스크립트가 같이 처리할 수 있습니다.
-
-### 내 PC에 설치되어 있는지 확인하는 방법
-
-아래 명령을 PowerShell에 그대로 넣어 보세요.
-
-```powershell
-git --version
-node -v
-npm -v
-py --version
-```
-
-버전 숫자가 보이면 설치된 상태입니다.  
-명령을 찾을 수 없다고 나오면, 그 프로그램을 먼저 설치해야 합니다.
-
-## 가장 쉬운 시작 방법
+Windows 10/11에서 `winget`를 쓸 수 있다면, Git / Node.js / Python까지 자동으로 준비할 수 있습니다.
 
 ### 1. 저장소 받기
+
+#### 방법 A. Git이 이미 설치되어 있는 경우
 
 ```powershell
 git clone https://github.com/synuson/OpenclawWeb.git
 cd OpenclawWEB
 ```
 
-### 2. 웹용 자동 준비 실행
+#### 방법 B. Git이 아직 없는 경우
 
-아래 명령 하나면 웹 버전에 필요한 기본 준비를 자동으로 합니다.
+1. GitHub 저장소 페이지를 엽니다.
+2. `Code` 버튼을 누릅니다.
+3. `Download ZIP`을 누릅니다.
+4. 압축을 풉니다.
+5. 압축을 푼 폴더를 PowerShell에서 엽니다.
+
+### 2. 선행 설치 자동 준비
+
+아래 명령은 Windows의 `winget`를 이용해 Git, Node.js LTS, Python 3를 자동으로 설치하거나 업그레이드합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-prereqs.ps1
+```
+
+이 명령이 하는 일:
+
+- Git이 없으면 설치
+- Node.js가 없거나 너무 낮으면 LTS 버전 설치/업그레이드
+- Python이 없으면 설치
+
+중요:
+
+- 이 단계는 Windows 10/11 + `winget`가 있는 PC에서 가장 잘 동작합니다.
+- 설치가 실제로 발생했다면 PowerShell 창을 완전히 닫고 다시 여는 편이 안전합니다.
+
+이미 `npm`이 되는 PC라면 아래처럼 실행해도 됩니다.
+
+```powershell
+npm run setup:prereqs
+```
+
+### 3. 웹용 자동 준비
 
 ```powershell
 npm run setup:web
@@ -65,19 +66,45 @@ npm run setup:web
 - 루트 `.env.local` 파일이 없으면 자동 생성
 - 이미 있는 `.env.local` 파일은 덮어쓰지 않음
 
-### 3. 웹 서버 실행
+### 4. 웹 서버 실행
 
 ```powershell
 npm run dev
 ```
 
-### 4. 브라우저에서 열기
+### 5. 브라우저에서 열기
 
 ```text
 http://localhost:3000/meeting
 ```
 
 여기까지 되면 데모 모드로 바로 화면을 볼 수 있습니다.
+
+## 이 PC에 준비되어 있으면 좋은 것
+
+### 자동 설치 스크립트가 처리할 수 있는 것
+
+- Git
+- Node.js 20 이상
+- npm
+- Python 3
+
+### 별도로 있으면 좋은 것
+
+- Chrome 또는 Edge  
+  브라우저 STT/TTS와 마이크 사용 확인이 가장 쉽습니다.
+
+### 직접 확인하는 방법
+
+```powershell
+git --version
+node -v
+npm -v
+py --version
+winget --version
+```
+
+버전 숫자가 보이면 설치된 상태입니다.
 
 ## 데모 모드와 실제 OpenClaw 연결의 차이
 
@@ -99,7 +126,7 @@ http://localhost:3000/meeting
 
 ## 내 OpenClaw를 연결하는 가장 쉬운 방법
 
-### 1. 먼저 `apps/web/.env.local` 파일을 엽니다
+### 1. `apps/web/.env.local` 파일을 엽니다
 
 웹 버전은 이 파일을 가장 중요하게 읽습니다.
 
@@ -123,7 +150,7 @@ OPENCLAW_BASE_URL=https://your-openclaw-host
 OPENCLAW_API_KEY=your_token
 ```
 
-중요:  
+중요:
 stock gateway에서는 `OPENCLAW_BASE_URL` 뒤에 `/api`를 붙이면 오히려 안 될 수 있습니다.
 
 ### 3. 저장 후 개발 서버를 다시 시작합니다
@@ -147,7 +174,7 @@ npm run dev
 
 ## 내 OpenClaw 주소와 API key를 어디서 찾는가
 
-이 부분이 가장 자주 막히는 지점입니다.  
+이 부분이 가장 자주 막히는 지점입니다.
 자기 상황에 맞는 항목만 읽으면 됩니다.
 
 ### 1. 내 컴퓨터에서 OpenClaw를 직접 실행하는 경우
@@ -196,7 +223,7 @@ OPENCLAW_BASE_URL=http://127.0.0.1:18789
 
 ## Bearer 방식이 아닌 인증을 쓰는 경우
 
-어떤 OpenClaw는 `Authorization: Bearer ...` 대신 다른 헤더를 씁니다.  
+어떤 OpenClaw는 `Authorization: Bearer ...` 대신 다른 헤더를 씁니다.
 그럴 때만 아래 값도 추가하세요.
 
 ```env
@@ -222,16 +249,16 @@ OPENCLAW_API_KEY_PREFIX=Bearer
 
 회의 답변은 `OPENCLAW_BASE_URL`만 맞아도 붙는 경우가 많습니다.
 
-다만 조사 패널은 `/tasks` 계열 API가 있으면 가장 안정적입니다.  
-현재 코드 기준으로는 `/tasks`가 `404`, `405`, `501`처럼  
-`이 경로를 지원하지 않음`으로 돌아올 때만 일부 대체 흐름으로 내려갑니다.  
+다만 조사 패널은 `/tasks` 계열 API가 있으면 가장 안정적입니다.
+현재 코드 기준으로는 `/tasks`가 `404`, `405`, `501`처럼
+`이 경로를 지원하지 않음`으로 돌아올 때만 일부 대체 흐름으로 내려갑니다.
 `401`, `403`, `500`은 그대로 실패할 수 있습니다.
 
 ## 자주 막히는 문제
 
 ### 1. `apps/web/.env.local` 대신 루트 `.env.local`만 만든 경우
 
-웹 버전은 `apps/web/.env.local`을 가장 먼저 확인하세요.  
+웹 버전은 `apps/web/.env.local`을 가장 먼저 확인하세요.
 루트 `.env.local`은 선택 사항입니다.
 
 ### 2. 값을 바꿨는데 그대로인 경우
@@ -249,7 +276,18 @@ OPENCLAW_API_KEY_PREFIX=Bearer
 - 서버가 `/chat`, `/v1/chat/completions`, `/v1/responses` 중 하나에 응답하는지
 - 텔레그램만 되고 HTTP API는 없는 상태가 아닌지
 
-### 4. 흰 화면이나 CSS/JS 깨짐이 보이는 경우
+### 4. `npm` 명령이 안 먹는 경우
+
+Node.js가 아직 설치되지 않았을 가능성이 큽니다.
+먼저 아래를 실행하세요.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-prereqs.ps1
+```
+
+설치가 일어났다면 PowerShell 창을 닫고 다시 연 뒤 진행하세요.
+
+### 5. 흰 화면이나 CSS/JS 깨짐이 보이는 경우
 
 개발 캐시를 지우고 다시 실행하면 해결되는 경우가 많습니다.
 
@@ -278,6 +316,8 @@ npm run setup:openclaw-backend
 ## 자주 쓰는 명령
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-prereqs.ps1
+npm run setup:prereqs
 npm run setup:web
 npm run dev
 npm run build:web

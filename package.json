@@ -25,6 +25,7 @@
     "electron:dev": "concurrently \"npm run electron:tsc:watch\" \"wait-on apps/desktop/.electron-build/electron/main.js && electron .\"",
     "electron:build": "npm run electron:tsc && npm run build:desktop && electron-builder",
     "prisma:generate": "prisma generate --schema apps/desktop/prisma/schema.prisma",
+    "setup:prereqs": "powershell -ExecutionPolicy Bypass -File scripts/setup-prereqs.ps1",
     "setup:web": "powershell -ExecutionPolicy Bypass -File scripts/setup-web.ps1",
     "setup:openclaw-backend": "powershell -ExecutionPolicy Bypass -File scripts/setup-openclaw-backend.ps1"
   },
