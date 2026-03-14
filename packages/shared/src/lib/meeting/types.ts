@@ -1,4 +1,18 @@
-﻿export type AgentId = "assistant" | "analyst";
+import type { AppLocale } from "@/lib/i18n/config";
+
+export type AgentId = "assistant" | "analyst";
+
+export type AgentAvatarVariant = "aurora" | "graphite" | "sunset" | "lagoon";
+export type AgentAvatarPreset = "core" | "orbit" | "signal" | "grid";
+
+export type AgentPersonaConfig = {
+  displayName: string;
+  toneStyle: string;
+  avatarVariant: AgentAvatarVariant;
+  avatarPreset: AgentAvatarPreset;
+};
+
+export type AgentPersonaOverrides = Partial<Record<AgentId, Partial<AgentPersonaConfig>>>;
 
 export type Provider = "openclaw" | "openai" | "anthropic" | "cerebras" | "mock";
 
@@ -26,6 +40,7 @@ export type MeetingChatRequest = {
   participants: string[];
   history: ChatHistoryItem[];
   phase?: RoundPhase;
+  locale?: AppLocale;
 };
 
 export type MeetingChatResponse = {
@@ -77,12 +92,15 @@ export type MarketQuote = {
   previousClose?: number;
   volume?: number;
   delayed?: boolean;
+  session?: MarketSessionState;
 };
 
 export type MarketSparkPoint = {
   ts: string;
   price: number;
 };
+
+export type MarketSessionState = "always" | "pre" | "open" | "post" | "closed";
 
 export type MarketSnapshot = {
   tab: WorkspaceTab;
@@ -96,6 +114,7 @@ export type MarketSnapshot = {
   sparkline?: MarketSparkPoint[];
   notes: string[];
   delayed: boolean;
+  session: MarketSessionState;
 };
 
 export type PortfolioPosition = {
@@ -184,12 +203,36 @@ export type MeetingRoundRequest = {
   marketSnapshot?: MarketSnapshot | null;
   portfolioSnapshot?: PortfolioSnapshot | null;
   minutes?: MeetingMinutes | null;
+  locale?: AppLocale;
+  personaOverrides?: AgentPersonaOverrides;
+};
+
+export type MeetingRoundStopReason =
+  | "conversation_complete"
+  | "research_complete"
+  | "research_failed"
+  | "clarification_needed";
+
+export type MeetingRoundMeta = {
+  firstSpeakerId: AgentId;
+  finalSpeakerId: AgentId;
+  usedResearch: boolean;
+  researchAgentId?: AgentId;
+  researchStatus?: MeetingTaskStatus;
+  stopReason: MeetingRoundStopReason;
+};
+
+export type MeetingRoundResearch = {
+  task: MeetingTask;
+  artifacts: MeetingTaskArtifacts;
 };
 
 export type MeetingRoundResponse = {
   turns: MeetingTurn[];
   minutes: MeetingMinutes;
   provider: Provider;
+  meta: MeetingRoundMeta;
+  research?: MeetingRoundResearch;
   actions?: MeetingAction[];
 };
 
@@ -216,6 +259,7 @@ export type MeetingTask = {
   taskId: string;
   sessionId: string;
   agentId: AgentId | string;
+  locale?: AppLocale;
   instruction: string;
   url?: string;
   status: MeetingTaskStatus;

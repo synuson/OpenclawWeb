@@ -111,18 +111,29 @@ MEETING_LLM_PROVIDER=openai
 - `GET /tasks/:id`
 - `GET /tasks/:id/artifacts`
 
-? adapter? ?? alias? ?????.
+이 adapter는 아래 alias를 받아들입니다.
 
-- ?? ID: `taskId` | `task_id` | `id`
-- ?? ID: `sessionId` | `session_id` | `session`
-- ???? ID: `agentId` | `agent_id` | `agent`
-- ??: `status` | `state`
-- ??: `summary` | `message`
-- ????: `screenshot` | `image` | `artifacts.screenshot` | `artifacts.image`
-- ?? ??: `updatedAt` | `updated_at`
+- task ID: `taskId` | `task_id` | `id`
+- session ID: `sessionId` | `session_id` | `session`
+- agent ID: `agentId` | `agent_id` | `agent`
+- 상태: `status` | `state`
+- 요약: `summary` | `message`
+- 스크린샷: `screenshot` | `image` | `artifacts.screenshot` | `artifacts.image`
+- 갱신 시각: `updatedAt` | `updated_at`
 
-## ?? ???
+### 에이전트 내재형 조사 모드
 
+`POST /api/meeting/round`는 필요할 때 OpenClaw task를 자동으로 실행할 수 있습니다. 이때 메인 채팅은 OpenClaw 로그를 그대로 노출하지 않고, 에이전트가 조사 결과를 사람처럼 정리해서 전달합니다.
+
+직접 OpenClaw를 붙일 때 권장 사항:
+
+- `POST /tasks`는 가능한 한 짧은 시간 안에 `taskId`, `status`, `summary`를 반환
+- `GET /tasks/:id`는 `queued/running/succeeded/failed` 중 하나를 안정적으로 반환
+- `GET /tasks/:id/artifacts`는 `notes[]`를 우선 주고, 가능하면 `screenshot`도 함께 제공
+- 메인 답변에서 에이전트가 다시 서술하도록 artifact의 `notes[]`는 짧고 사실 전달형으로 유지
+- 조사 자체가 실패해도 회의 라운드 전체가 무너지지 않도록 실패 응답에도 최소한의 `summary`를 포함
+
+## 주요 라우트
 - `POST /api/meeting/round`
 - `POST /api/meeting/chat`
 - `GET /api/system/capabilities`

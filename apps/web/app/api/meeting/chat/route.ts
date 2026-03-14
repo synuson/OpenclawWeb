@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { AGENTS_BY_ID, DEFAULT_AGENT_ID, detectMentionedAgentId } from "@/lib/meeting/agents";
+import { resolveAppLocale } from "@/lib/i18n/config";
+import { DEFAULT_AGENT_ID, detectMentionedAgentId, getAgentsById } from "@/lib/meeting/agents";
 import { getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
 import { callLLM, detectBrowserActions, getAgentContext, isoNow, pickProvider } from "@/lib/meeting/provider";
 import type { MeetingChatRequest, MeetingChatResponse } from "@/lib/meeting/types";
@@ -14,12 +15,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
+    const locale = resolveAppLocale(body.locale);
+    const agentsById = getAgentsById(locale);
     const participants = Array.isArray(body.participants) ? body.participants : [];
     const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
 
     let chosenId =
       body.agentId?.trim() ||
-      detectMentionedAgentId(body.message) ||
+      detectMentionedAgentId(body.message, locale) ||
       participants[participants.length - 1] ||
       DEFAULT_AGENT_ID;
 
@@ -27,18 +30,25 @@ export async function POST(request: Request) {
       chosenId = participants[participants.length - 1] || DEFAULT_AGENT_ID;
     }
 
-    const agent = AGENTS_BY_ID[chosenId] ?? AGENTS_BY_ID[DEFAULT_AGENT_ID];
+    const normalizedAgentId = chosenId === "analyst" ? "analyst" : DEFAULT_AGENT_ID;
+    const agent = agentsById[normalizedAgentId];
     const preferredProvider = pickProvider();
-    const extraContext = await getAgentContext(agent.id);
-    const sections = getRoleDefinitionForAgent(agent.id).outputFormat.sections;
+    const extraContext = await getAgentContext(agent.id, locale);
+    const sections = getRoleDefinitionForAgent(agent.id, locale).outputFormat.sections;
     const systemPrompt = [
       agent.systemPrompt,
-      "[Meeting rules]",
-      "- Respond in Korean.",
-      "- Keep the exact section headings when the role definition requires them.",
-      "- You may suggest a follow-up OpenClaw research task when web verification is needed.",
-      "- Stay inside the meeting-room UI context instead of pretending to be in a live call.",
-      "[Extra context]",
+      locale === "ko" ? "[미팅 규칙]" : "[Meeting Rules]",
+      locale === "ko" ? "- 반드시 한국어로 답하세요." : "- Answer in English.",
+      locale === "ko"
+        ? "- 역할 정의에 있는 섹션 제목을 정확히 유지하세요."
+        : "- Keep the exact section headings required by the role definition.",
+      locale === "ko"
+        ? "- 웹 검증이 필요하면 OpenClaw 후속 조사를 짧게 제안할 수 있습니다."
+        : "- You may suggest an OpenClaw follow-up when web verification is needed.",
+      locale === "ko"
+        ? "- 실제 음성 통화가 아니라 회의 UI 안에서 대화 중이라는 전제를 유지하세요."
+        : "- Keep the frame that this is a discussion inside a meeting UI, not a real voice call.",
+      locale === "ko" ? "[추가 컨텍스트]" : "[Extra Context]",
       extraContext
     ].join("\n\n");
 
@@ -48,14 +58,19 @@ export async function POST(request: Request) {
       agentSystemPrompt: systemPrompt,
       message: body.message,
       history,
+      locale,
       requiredSections: sections
     });
 
     const actions = result.provider === "openclaw" ? [] : detectBrowserActions(body.message);
     let reply = result.text;
 
-    if (actions.length > 0 && !/(OpenClaw|research|browse|web)/i.test(reply)) {
-      reply = `${reply}\n\n\ucd94\uac00 \uc6f9 \uc870\uc0ac\uac00 \ud544\uc694\ud558\uba74 OpenClaw \uc870\uc0ac \ud328\ub110\uc5d0\uc11c \ud6c4\uc18d \ud655\uc778\uc744 \uc9c4\ud589\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.`;
+    if (actions.length > 0 && !/(web|research|browser|OpenClaw|웹 조사|브라우저|확인)/i.test(reply)) {
+      reply = `${reply}\n\n${
+        locale === "ko"
+          ? "추가 웹 조사가 필요하면 OpenClaw 후속 조사를 실행할 수 있습니다."
+          : "Run an OpenClaw follow-up if additional web research is needed."
+      }`;
     }
 
     const response: MeetingChatResponse = {

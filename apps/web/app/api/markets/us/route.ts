@@ -11,7 +11,11 @@ export async function GET(request: Request) {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    return NextResponse.json(await getUsMarketSnapshot(symbols));
+    return NextResponse.json(await getUsMarketSnapshot(symbols), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8"
+      }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,36 +1,87 @@
 import type { AgentStatus, AutoSpeakMode, WorkspaceTab } from "@/lib/meeting/types";
+import { DEFAULT_LOCALE, getIntlLocale, getSpeechLocale, type AppLocale } from "@/lib/i18n/config";
 
-export type AppLocale = "ko";
+const BADGE_LABELS: Record<AppLocale, Record<string, string>> = {
+  ko: {
+    analysis: "분석",
+    summary: "요약",
+    queued: "대기열",
+    running: "실행 중",
+    succeeded: "완료",
+    failed: "실패",
+    error: "오류",
+    warning: "경고",
+    info: "안내",
+    success: "성공",
+    open: "접수",
+    filled: "체결",
+    rejected: "거절",
+    loading: "불러오는 중",
+    ready: "준비",
+    live: "실시간",
+    demo: "데모",
+    delayed: "지연",
+    standby: "대기"
+  },
+  en: {
+    analysis: "Analysis",
+    summary: "Summary",
+    queued: "Queued",
+    running: "Running",
+    succeeded: "Done",
+    failed: "Failed",
+    error: "Error",
+    warning: "Warning",
+    info: "Info",
+    success: "Success",
+    open: "Open",
+    filled: "Filled",
+    rejected: "Rejected",
+    loading: "Loading",
+    ready: "Ready",
+    live: "Live",
+    demo: "Demo",
+    delayed: "Delayed",
+    standby: "Standby"
+  }
+};
 
-export const DEFAULT_LOCALE: AppLocale = "ko";
+const ORDER_SIDE_LABELS: Record<AppLocale, Record<"buy" | "sell", string>> = {
+  ko: {
+    buy: "매수",
+    sell: "매도"
+  },
+  en: {
+    buy: "Buy",
+    sell: "Sell"
+  }
+};
 
-const BADGE_LABELS = {
-  analysis: "분석",
-  summary: "요약",
-  queued: "대기열",
-  running: "실행 중",
-  succeeded: "완료",
-  failed: "실패",
-  error: "오류",
-  warning: "경고",
-  info: "안내",
-  success: "성공",
-  open: "접수",
-  filled: "체결",
-  rejected: "거절",
-  loading: "불러오는 중",
-  live: "실시간",
-  demo: "데모",
-  delayed: "지연",
-  standby: "대기"
-} as const;
+const ORDER_TYPE_LABELS: Record<AppLocale, Record<"market" | "limit", string>> = {
+  ko: {
+    market: "시장가",
+    limit: "지정가"
+  },
+  en: {
+    market: "Market",
+    limit: "Limit"
+  }
+};
 
 const dictionaries = {
   ko: {
     app: {
       lang: "ko",
       title: "OpenClawWEB 금융 미팅룸",
-      description: "두 에이전트가 참여하는 금융 회의 워크스페이스. 시장 탭, 모의투자, OpenClaw 조사를 한 화면에서 다룹니다."
+      description:
+        "두 에이전트가 참여하는 금융 워크스페이스. 시장 탭, 모의투자, OpenClaw 조사를 한 화면에서 다룹니다.",
+      localeLabel: "언어",
+      localeNames: {
+        ko: "한국어",
+        en: "English"
+      },
+      dateLocale: getIntlLocale("ko"),
+      speechLocale: getSpeechLocale("ko")
     },
     tabs: {
       btc: "비트코인",
@@ -51,7 +102,11 @@ const dictionaries = {
     } satisfies Record<AgentStatus, string>,
     agentCard: {
       latestBrief: "최근 브리프",
-      portraitAlt: (name: string) => `${name} 프로필 이미지`
+      portraitAlt: (name: string) => `${name} 프로필 이미지`,
+      descriptors: {
+        assistant: "진행자",
+        analyst: "리스크 데스크"
+      }
     },
     meeting: {
       headerBadge: "금융 미팅룸",
@@ -60,7 +115,7 @@ const dictionaries = {
       tabBadge: (tab: string) => `탭 ${tab}`,
       openClawBadge: (id: string) => `OpenClaw ${id}`,
       title: "2인 금융 전략 워크스페이스",
-      initialNotice: "브라우저 음성 기능과 데모 시세 피드가 준비되었습니다.",
+      initialNotice: "브라우저 음성 기능과 시장 모니터가 준비되었습니다.",
       browserStt: "브라우저 STT",
       whisper: "Whisper",
       browserTts: "브라우저 TTS",
@@ -77,11 +132,14 @@ const dictionaries = {
       userLabel: "나",
       systemLabel: "시스템",
       localCam: "로컬 카메라",
-      cameraFallback: "카메라 미리보기는 선택 사항입니다. 카메라가 없어도 회의는 계속 진행됩니다.",
+      cameraFallback:
+        "카메라 미리보기는 선택 사항입니다. 카메라가 없어도 회의는 계속 진행됩니다.",
       timelineEmpty: "회의를 한 번 실행하면 회의록이 생성됩니다.",
       savedLocally: "로컬 저장됨",
       download: "다운로드",
-      placeholder: "비트코인, 국내 주식, 미국 증시, 모의투자에 대해 분석가와 진행자에게 물어보세요...",
+      downloadFilename: (date: string) => `회의록-${date}.md`,
+      placeholder:
+        "비트코인, 국내 주식, 미국 증시, 모의투자에 대해 분석가와 진행자에게 물어보세요...",
       runMeeting: "회의 실행",
       runningMeeting: "실행 중...",
       reset: "초기화",
@@ -90,6 +148,8 @@ const dictionaries = {
       browserMic: "브라우저 마이크",
       stopWhisper: "Whisper 중지",
       whisperRecord: "Whisper 녹음",
+      speakAndRun: "말하고 바로 실행",
+      whisperAndRun: "Whisper 바로 실행",
       openClawResearch: "OpenClaw 조사",
       openClawSummary: "요약",
       openClawIdle: "웹 조사 요청이나 수동 실행 전까지 OpenClaw는 대기합니다.",
@@ -102,6 +162,29 @@ const dictionaries = {
       feedNotes: "피드 메모",
       noFeedNotes: "피드 메모가 없습니다.",
       noIntradaySparkline: "당일 스파크라인이 없습니다.",
+      marketOverview: "시장 개요",
+      marketPulse: "시장 상태",
+      marketSource: "데이터 소스",
+      marketReferenceTime: "기준 시각",
+      marketPreviousClose: "전일 종가",
+      marketVolume: "거래량",
+      marketChange: "변동폭",
+      marketWatch: "관찰 포인트",
+      marketClosedNote: "휴장 중이며 마지막 종가 기준으로 표시합니다.",
+      marketPreNote: "정규장 시작 전 호가와 프리마켓 흐름을 반영합니다.",
+      marketPostNote: "정규장 종료 후 시간외 흐름을 반영합니다.",
+      marketLiveNote: "정규장 기준으로 최신 체결 흐름을 반영합니다.",
+      marketDelayedNote: "지연 시세 기준으로 표시합니다.",
+      marketDemoNote: "실데이터 연결 전까지 데모 피드로 표시합니다.",
+      marketFeedNote: (provider: string) => `${provider} 기준 데이터입니다.`,
+      providerNames: {
+        upbit: "업비트",
+        "naver-finance": "네이버 파이낸스",
+        "yahoo-finance": "야후 파이낸스",
+        "kiwoom-proxy": "키움 프록시",
+        "twelve-data": "Twelve Data",
+        demo: "데모"
+      },
       tradingCash: "예수금",
       tradingEquity: "총자산",
       paperTrade: "모의투자",
@@ -111,11 +194,26 @@ const dictionaries = {
       limitPlaceholder: "지정가",
       submitOrder: "모의 주문 제출",
       submittingOrder: "주문 전송 중...",
-      btckrw: "BTC / KRW",
-      kospiKosdaq: "코스피 / 코스닥",
+      btckrw: "비트코인 시세",
+      kospiKosdaq: "국내 대표지수",
       krWatchlist: "국내 관심종목",
-      usProxies: "미국 시장 프록시",
+      usProxies: "미국 대표지수",
       usWatchlist: "미국 관심종목",
+      settings: "설정",
+      language: "언어",
+      enterHint: "Enter 실행 · Shift+Enter 줄바꿈",
+      voiceAutoRunOn: "마이크 결과를 받으면 바로 회의를 시작합니다.",
+      voiceAutoRunOff: "마이크 결과는 입력창에만 채웁니다.",
+      voiceAutoRunLabelOn: "음성 자동 실행 켜짐",
+      voiceAutoRunLabelOff: "음성 자동 실행 꺼짐",
+      voiceSubmittingBrowser: "브라우저 음성을 받아 바로 회의를 시작합니다.",
+      voiceSubmittingWhisper: "Whisper 음성을 받아 바로 회의를 시작합니다.",
+      capabilityStates: {
+        browser: "브라우저",
+        unavailable: "없음",
+        ready: "준비",
+        off: "꺼짐"
+      },
       capabilitiesLine: (args: {
         browserStt: string;
         whisper: string;
@@ -154,14 +252,193 @@ const dictionaries = {
       timeline: "타임라인"
     },
     trading: {
-      side: {
-        buy: "매수",
-        sell: "매도"
+      side: ORDER_SIDE_LABELS.ko,
+      orderType: ORDER_TYPE_LABELS.ko
+    }
+  },
+  en: {
+    app: {
+      lang: "en",
+      title: "OpenClawWEB Finance War Room",
+      description:
+        "A two-agent finance workspace covering market tabs, paper trading, and OpenClaw research in one view.",
+      localeLabel: "Language",
+      localeNames: {
+        ko: "Korean",
+        en: "English"
       },
-      orderType: {
-        market: "시장가",
-        limit: "지정가"
+      dateLocale: getIntlLocale("en"),
+      speechLocale: getSpeechLocale("en")
+    },
+    tabs: {
+      btc: "Bitcoin",
+      kr: "Korean Equities",
+      us: "US Markets",
+      trading: "Paper Trading"
+    } satisfies Record<WorkspaceTab, string>,
+    autoSpeak: {
+      summary: "Summary only",
+      all: "Read all",
+      off: "Mute"
+    } satisfies Record<AutoSpeakMode, string>,
+    agentStatus: {
+      idle: "Idle",
+      thinking: "Thinking",
+      speaking: "Speaking",
+      browsing: "Researching"
+    } satisfies Record<AgentStatus, string>,
+    agentCard: {
+      latestBrief: "Latest brief",
+      portraitAlt: (name: string) => `${name} portrait`,
+      descriptors: {
+        assistant: "Facilitator",
+        analyst: "Risk Desk"
       }
+    },
+    meeting: {
+      headerBadge: "Finance War Room",
+      fixedAgents: "2 fixed agents",
+      providerBadge: (provider: string) => `Model ${provider}`,
+      tabBadge: (tab: string) => `Tab ${tab}`,
+      openClawBadge: (id: string) => `OpenClaw ${id}`,
+      title: "Two-agent finance strategy workspace",
+      initialNotice: "Browser voice features and the market monitor are ready.",
+      browserStt: "Browser STT",
+      whisper: "Whisper",
+      browserTts: "Browser TTS",
+      elevenLabs: "ElevenLabs",
+      workspaceEyebrow: "Workspace",
+      workspaceTitle: "Market Tabs",
+      stageEyebrow: "Stage",
+      stageTitle: "Meeting View",
+      timelineEyebrow: "Timeline",
+      timelineTitle: "Meeting Log",
+      minutesEyebrow: "Minutes",
+      minutesTitle: "Current Session",
+      participants: (count: number) => `${count} participants`,
+      userLabel: "You",
+      systemLabel: "System",
+      localCam: "Local camera",
+      cameraFallback:
+        "Camera preview is optional. The meeting can continue without a camera.",
+      timelineEmpty: "Run a meeting once to generate the minutes.",
+      savedLocally: "Saved locally",
+      download: "Download",
+      downloadFilename: (date: string) => `meeting-minutes-${date}.md`,
+      placeholder:
+        "Ask the analyst and facilitator about bitcoin, Korean equities, US markets, or paper trading...",
+      runMeeting: "Run meeting",
+      runningMeeting: "Running...",
+      reset: "Reset",
+      runOpenClaw: "Run OpenClaw",
+      stopMic: "Stop mic",
+      browserMic: "Browser mic",
+      stopWhisper: "Stop Whisper",
+      whisperRecord: "Whisper record",
+      speakAndRun: "Speak and run",
+      whisperAndRun: "Whisper and run",
+      openClawResearch: "OpenClaw Research",
+      openClawSummary: "Summary",
+      openClawIdle: "OpenClaw stays idle until a web research request or manual run is triggered.",
+      noResearchTask: "No research task selected.",
+      recentTasks: "Recent tasks",
+      minutesSummary: "Summary",
+      marketSnapshot: "Market snapshot",
+      actionItems: "Action items",
+      tradeNotes: "Trade notes",
+      feedNotes: "Feed notes",
+      noFeedNotes: "No feed notes available.",
+      noIntradaySparkline: "No intraday sparkline available.",
+      marketOverview: "Market overview",
+      marketPulse: "Market pulse",
+      marketSource: "Data source",
+      marketReferenceTime: "Reference time",
+      marketPreviousClose: "Previous close",
+      marketVolume: "Volume",
+      marketChange: "Change",
+      marketWatch: "Watch notes",
+      marketClosedNote: "The market is closed. Quotes are anchored to the latest close.",
+      marketPreNote: "Quotes reflect pre-market activity before the regular session.",
+      marketPostNote: "Quotes reflect after-hours activity after the regular session.",
+      marketLiveNote: "Quotes reflect the latest regular-session market move.",
+      marketDelayedNote: "Quotes are marked as delayed by the provider.",
+      marketDemoNote: "The board is running on a demo feed until a live source is available.",
+      marketFeedNote: (provider: string) => `Feed source: ${provider}.`,
+      providerNames: {
+        upbit: "Upbit",
+        "naver-finance": "Naver Finance",
+        "yahoo-finance": "Yahoo Finance",
+        "kiwoom-proxy": "Kiwoom proxy",
+        "twelve-data": "Twelve Data",
+        demo: "Demo"
+      },
+      tradingCash: "Cash",
+      tradingEquity: "Equity",
+      paperTrade: "Paper Trading",
+      positions: "Positions",
+      recentOrders: "Recent orders",
+      quantityPlaceholder: "Quantity",
+      limitPlaceholder: "Limit",
+      submitOrder: "Submit paper order",
+      submittingOrder: "Submitting order...",
+      btckrw: "Bitcoin spot",
+      kospiKosdaq: "Korean benchmarks",
+      krWatchlist: "Korea watchlist",
+      usProxies: "US benchmarks",
+      usWatchlist: "US watchlist",
+      settings: "Settings",
+      language: "Language",
+      enterHint: "Enter to run · Shift+Enter for newline",
+      voiceAutoRunOn: "The meeting starts immediately when a mic result arrives.",
+      voiceAutoRunOff: "Mic results only fill the input box.",
+      voiceAutoRunLabelOn: "Voice auto-run on",
+      voiceAutoRunLabelOff: "Voice auto-run off",
+      voiceSubmittingBrowser: "Starting the meeting from the browser transcript.",
+      voiceSubmittingWhisper: "Starting the meeting from the Whisper transcript.",
+      capabilityStates: {
+        browser: "Browser",
+        unavailable: "Unavailable",
+        ready: "Ready",
+        off: "Off"
+      },
+      capabilitiesLine: (args: {
+        browserStt: string;
+        whisper: string;
+        browserTts: string;
+        elevenLabs: string;
+      }) =>
+        `Capabilities: STT ${args.browserStt}, Whisper ${args.whisper}, TTS ${args.browserTts}, ElevenLabs ${args.elevenLabs}.`,
+      notices: {
+        openClawStarting: "Starting an OpenClaw research task.",
+        openClawCompleted: "OpenClaw finished the task.",
+        openClawFailed: "OpenClaw failed the task.",
+        openClawStartFailed: "Failed to start the OpenClaw task.",
+        browserSttUnsupported: "This browser does not support browser STT.",
+        transcriptInserted: "The transcript was inserted into the composer.",
+        whisperFailed: "Whisper transcription failed.",
+        whisperInserted: "The Whisper transcript was inserted into the composer.",
+        whisperRecording: "Whisper is recording. Press again to stop.",
+        audioPermissionUnavailable: "Audio capture permission is unavailable.",
+        meetingCompleted: (provider: string) => `Meeting round completed with ${provider}.`,
+        meetingFailed: "Meeting round failed.",
+        paperOrder: (status: string) => `Paper order status: ${status}`,
+        paperOrderFailed: "Failed to place the paper order.",
+        reset: "The meeting was reset. Market panels and the portfolio will keep updating."
+      }
+    },
+    markdown: {
+      updated: "Updated",
+      workspace: "Workspace",
+      summary: "Summary",
+      marketSnapshot: "Market snapshot",
+      keyPoints: "Key points",
+      actionItems: "Action items",
+      tradeNotes: "Trade notes",
+      timeline: "Timeline"
+    },
+    trading: {
+      side: ORDER_SIDE_LABELS.en,
+      orderType: ORDER_TYPE_LABELS.en
     }
   }
 } as const;
@@ -172,30 +449,24 @@ export function getDictionary(locale: AppLocale = DEFAULT_LOCALE): AppDictionary
   return dictionaries[locale];
 }
 
-export function labelForBadge(value?: string | null) {
+export function labelForBadge(value?: string | null, locale: AppLocale = DEFAULT_LOCALE) {
   if (!value) {
     return "";
   }
 
-  return BADGE_LABELS[value as keyof typeof BADGE_LABELS] ?? value;
+  return BADGE_LABELS[locale][value] ?? value;
 }
 
-export function labelForOrderSide(value: string) {
-  if (value === "buy") {
-    return "매수";
-  }
-  if (value === "sell") {
-    return "매도";
+export function labelForOrderSide(value: string, locale: AppLocale = DEFAULT_LOCALE) {
+  if (value === "buy" || value === "sell") {
+    return ORDER_SIDE_LABELS[locale][value];
   }
   return value;
 }
 
-export function labelForOrderType(value: string) {
-  if (value === "market") {
-    return "시장가";
-  }
-  if (value === "limit") {
-    return "지정가";
+export function labelForOrderType(value: string, locale: AppLocale = DEFAULT_LOCALE) {
+  if (value === "market" || value === "limit") {
+    return ORDER_TYPE_LABELS[locale][value];
   }
   return value;
 }

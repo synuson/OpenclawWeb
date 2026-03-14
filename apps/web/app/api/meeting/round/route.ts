@@ -1,4 +1,5 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { resolveAppLocale } from "@/lib/i18n/config";
 import { runMeetingRound } from "@/lib/meeting/orchestrator";
 import type { MeetingRoundRequest } from "@/lib/meeting/types";
 
@@ -19,7 +20,9 @@ export async function POST(request: Request) {
         activeTab: body.activeTab || "btc",
         marketSnapshot: body.marketSnapshot ?? null,
         portfolioSnapshot: body.portfolioSnapshot ?? null,
-        minutes: body.minutes ?? null
+        minutes: body.minutes ?? null,
+        locale: resolveAppLocale(body.locale),
+        personaOverrides: body.personaOverrides
       })
     );
   } catch (error) {

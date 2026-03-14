@@ -1,14 +1,22 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { AGENTS, AGENTS_BY_ID } from "@/lib/meeting/agents";
+import { startTransition, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import {
+  APP_LOCALE_COOKIE,
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  type AppLocale
+} from "@/lib/i18n/config";
+import { getAgents, getAgentsById, getDefaultAgentPersonas } from "@/lib/meeting/agents";
 import type {
   AgentId,
   AgentStatus,
+  AgentAvatarPreset,
+  AgentAvatarVariant,
+  AgentPersonaOverrides,
   AutoSpeakMode,
   Capabilities,
   ChatHistoryItem,
-  MeetingAction,
   MeetingMinutes,
   MeetingRoundResponse,
   MeetingSessionRecord,
@@ -16,6 +24,7 @@ import type {
   MeetingTaskArtifacts,
   MeetingTimelineItem,
   MarketSnapshot,
+  MarketSessionState,
   PortfolioSnapshot,
   Provider,
   SpeechMode,
@@ -25,7 +34,6 @@ import type {
   WorkspaceTab
 } from "@/lib/meeting/types";
 import { Badge } from "@/components/ui/badge";
-import { AgentStageCard } from "@/components/agent-stage-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,15 +41,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getDictionary, labelForBadge, labelForOrderSide, labelForOrderType } from "@/lib/i18n/messages";
 import {
+  clamp,
   cn,
   formatCurrency,
   formatNumber,
+  formatSignedNumber,
   formatSignedPercent,
   formatTime,
   uid
 } from "@/lib/utils";
-
-const copy = getDictionary();
 
 type BrowserSpeechRecognition = {
   continuous: boolean;
@@ -63,24 +71,219 @@ type TradeFormState = {
   limitPrice: string;
 };
 
+type DockTab = "session" | "minutes" | "research";
+
 const MINUTES_STORAGE_KEY = "openclawweb.minutes.v1";
+const PERSONA_STORAGE_KEY = "openclawweb.personas.v1";
 const KR_DEFAULT_SYMBOLS = ["005930", "000660", "035420"];
 const US_DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA"];
-const TAB_LABELS: Record<WorkspaceTab, string> = copy.tabs;
-const UX_COPY = {
-  enterHint: "Enter 실행 · Shift+Enter 줄바꿈",
-  voiceAutoRunOn: "마이크는 말이 끝나면 바로 회의를 시작합니다.",
-  voiceAutoRunOff: "마이크 결과는 입력창에만 채웁니다.",
-  voiceAutoRunLabelOn: "음성 자동 실행 켜짐",
-  voiceAutoRunLabelOff: "음성 자동 실행 꺼짐",
-  voiceSubmittingBrowser: "음성을 받아 바로 회의를 시작합니다.",
-  voiceSubmittingWhisper: "Whisper 음성을 받아 바로 회의를 시작합니다."
-} as const;
+const WORKSPACE_TAB_MONOGRAMS: Record<WorkspaceTab, string> = {
+  btc: "BTC",
+  kr: "KR",
+  us: "US",
+  trading: "TR"
+};
 const LARGE_SELECT_CLASS_NAME =
-  "h-11 rounded-full border border-ink/10 bg-white/82 px-4 text-sm text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_12px_28px_rgba(18,24,36,0.05)] outline-none transition focus:border-cobalt/35 focus:ring-4 focus:ring-cobalt/10";
+  "h-11 rounded-full border border-ink/10 bg-white px-4 text-sm text-ink shadow-[0_12px_28px_rgba(18,24,36,0.05)] outline-none transition focus:border-cobalt/35 focus:ring-4 focus:ring-cobalt/10";
 const SMALL_SELECT_CLASS_NAME =
-  "h-9 rounded-full border border-ink/10 bg-white/80 px-3 text-xs text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_10px_20px_rgba(18,24,36,0.05)] outline-none transition focus:border-cobalt/35 focus:ring-4 focus:ring-cobalt/10";
+  "h-9 rounded-full border border-ink/10 bg-white px-3 text-xs text-ink shadow-[0_10px_20px_rgba(18,24,36,0.05)] outline-none transition focus:border-cobalt/35 focus:ring-4 focus:ring-cobalt/10";
 type MetricTone = "default" | "cobalt" | "mint" | "ember";
+type MeetingCopy = ReturnType<typeof getDictionary>;
+
+const PERSONA_AVATAR_THEMES: Record<
+  AgentAvatarVariant,
+  {
+    label: { ko: string; en: string };
+    shellClass: string;
+    haloClass: string;
+    badgeClass: string;
+    avatarClass: string;
+    previewClass: string;
+  }
+> = {
+  aurora: {
+    label: { ko: "오로라", en: "Aurora" },
+    shellClass: "bg-white",
+    haloClass: "hidden",
+    badgeClass: "border-emerald-200/70 bg-emerald-50 text-ink",
+    avatarClass: "border-emerald-200 bg-emerald-50 text-ink",
+    previewClass: "border-t-4 border-emerald-300 bg-white"
+  },
+  graphite: {
+    label: { ko: "그래파이트", en: "Graphite" },
+    shellClass: "bg-white",
+    haloClass: "hidden",
+    badgeClass: "border-slate-200 bg-slate-50 text-ink",
+    avatarClass: "border-slate-200 bg-slate-50 text-ink",
+    previewClass: "border-t-4 border-slate-300 bg-white"
+  },
+  sunset: {
+    label: { ko: "선셋", en: "Sunset" },
+    shellClass: "bg-white",
+    haloClass: "hidden",
+    badgeClass: "border-amber-200 bg-amber-50 text-ink",
+    avatarClass: "border-amber-200 bg-amber-50 text-ink",
+    previewClass: "border-t-4 border-amber-300 bg-white"
+  },
+  lagoon: {
+    label: { ko: "라군", en: "Lagoon" },
+    shellClass: "bg-white",
+    haloClass: "hidden",
+    badgeClass: "border-cyan-200 bg-cyan-50 text-ink",
+    avatarClass: "border-cyan-200 bg-cyan-50 text-ink",
+    previewClass: "border-t-4 border-cyan-300 bg-white"
+  }
+};
+
+const PERSONA_AVATAR_PRESETS: Record<
+  AgentAvatarPreset,
+  {
+    label: { ko: string; en: string };
+  }
+> = {
+  core: {
+    label: { ko: "코어", en: "Core" }
+  },
+  orbit: {
+    label: { ko: "오빗", en: "Orbit" }
+  },
+  signal: {
+    label: { ko: "시그널", en: "Signal" }
+  },
+  grid: {
+    label: { ko: "그리드", en: "Grid" }
+  }
+};
+
+const MARKET_SESSION_LABELS: Record<AppLocale, Record<Exclude<MarketSessionState, "always">, string>> = {
+  ko: {
+    open: "\uac1c\uc7a5",
+    pre: "\uc7a5\uc804",
+    post: "\uc2dc\uac04\uc678",
+    closed: "\ud734\uc7a5"
+  },
+  en: {
+    open: "Open",
+    pre: "Pre-market",
+    post: "After-hours",
+    closed: "Closed"
+  }
+};
+
+function labelForMarketSession(session: MarketSessionState | undefined, locale: AppLocale) {
+  if (!session || session === "always") {
+    return "";
+  }
+
+  return MARKET_SESSION_LABELS[locale][session];
+}
+
+function describeMarketSession(session: MarketSessionState | undefined, locale: AppLocale) {
+  switch (session) {
+    case "closed":
+      return locale === "ko" ? "\uc2dc\uc7a5 \ud734\uc7a5 \u00b7 \ub9c8\uc9c0\ub9c9 \uc885\uac00 \uae30\uc900" : "Market closed · last close";
+    case "pre":
+      return locale === "ko" ? "\uc7a5\uc804 \uc2dc\uc138 \uad6c\uac04" : "Pre-market session";
+    case "post":
+      return locale === "ko" ? "\uc2dc\uac04\uc678 \uc2dc\uc138 \uad6c\uac04" : "After-hours session";
+    case "open":
+      return locale === "ko" ? "\uc815\uaddc\uc7a5 \uc9c4\ud589 \uc911" : "Regular session";
+    default:
+      return "";
+  }
+}
+
+function getSnapshotUpdatedLabel(
+  snapshot: MarketSnapshot | null,
+  locale: AppLocale,
+  fallbackLabel: string
+) {
+  if (snapshot?.session === "closed") {
+    return locale === "ko" ? "\ub9c8\uc9c0\ub9c9 \uc885\uac00" : "Last close";
+  }
+
+  if (snapshot?.session === "post") {
+    return locale === "ko" ? "\ucd5c\uc2e0 \uccb4\uacb0" : "Latest trade";
+  }
+
+  return fallbackLabel;
+}
+
+function getSnapshotMetaDetail(snapshot: MarketSnapshot | null, locale: AppLocale) {
+  if (!snapshot) {
+    return "";
+  }
+
+  return [describeMarketSession(snapshot.session, locale), snapshot.provider].filter(Boolean).join(" · ");
+}
+
+function getMarketProviderLabel(snapshot: MarketSnapshot | null, copy: ReturnType<typeof getDictionary>) {
+  if (!snapshot) {
+    return copy.meeting.providerNames.demo;
+  }
+
+  const providerNames = copy.meeting.providerNames as Record<string, string>;
+  return providerNames[snapshot.provider] ?? snapshot.provider;
+}
+
+function getMarketHeadline(
+  snapshot: MarketSnapshot | null,
+  activeTab: WorkspaceTab,
+  copy: ReturnType<typeof getDictionary>,
+  tabLabels: Record<WorkspaceTab, string>
+) {
+  if (activeTab === "btc") {
+    return copy.meeting.btckrw;
+  }
+
+  if (activeTab === "trading") {
+    return copy.meeting.paperTrade;
+  }
+
+  return snapshot?.headline && copy.app.lang === "en" ? snapshot.headline : tabLabels[activeTab];
+}
+
+function getSnapshotSummary(
+  snapshot: MarketSnapshot | null,
+  copy: ReturnType<typeof getDictionary>,
+  locale: AppLocale
+) {
+  if (!snapshot) {
+    return copy.meeting.noFeedNotes;
+  }
+
+  const lines = [];
+  if (snapshot.session === "closed") {
+    lines.push(copy.meeting.marketClosedNote);
+  } else if (snapshot.session === "pre") {
+    lines.push(copy.meeting.marketPreNote);
+  } else if (snapshot.session === "post") {
+    lines.push(copy.meeting.marketPostNote);
+  } else {
+    lines.push(copy.meeting.marketLiveNote);
+  }
+
+  if (snapshot.status === "demo") {
+    lines.push(copy.meeting.marketDemoNote);
+  } else if (snapshot.delayed || snapshot.status === "delayed") {
+    lines.push(copy.meeting.marketDelayedNote);
+  }
+
+  lines.push(copy.meeting.marketFeedNote(getMarketProviderLabel(snapshot, copy)));
+
+  return lines.join(" ");
+}
+
+function formatMarketVolume(value: number | undefined, locale: string) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "--";
+  }
+
+  return new Intl.NumberFormat(locale, {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 10_000 ? 1 : 0
+  }).format(value);
+}
 
 function createTimelineItem(item: Omit<MeetingTimelineItem, "id">): MeetingTimelineItem {
   return { id: uid("timeline"), ...item };
@@ -91,6 +294,199 @@ function pickSpeechMimeType() {
   return candidates.find(
     (candidate) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(candidate)
   );
+}
+
+function buildPersonaState(locale: AppLocale, source?: AgentPersonaOverrides | null): AgentPersonaOverrides {
+  const defaults = getDefaultAgentPersonas(locale);
+  return {
+    assistant: { ...defaults.assistant, ...source?.assistant },
+    analyst: { ...defaults.analyst, ...source?.analyst }
+  };
+}
+
+function readStoredPersonas(locale: AppLocale) {
+  if (typeof window === "undefined") {
+    return buildPersonaState(locale);
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PERSONA_STORAGE_KEY);
+    if (!raw) {
+      return buildPersonaState(locale);
+    }
+
+    return buildPersonaState(locale, JSON.parse(raw) as AgentPersonaOverrides);
+  } catch {
+    return buildPersonaState(locale);
+  }
+}
+
+function persistPersonas(personas: AgentPersonaOverrides) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(PERSONA_STORAGE_KEY, JSON.stringify(personas));
+}
+
+function getAgentMonogram(name: string) {
+  return Array.from(name.trim() || "AI")
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function AgentAvatarBadge({
+  name,
+  preset,
+  themeClass,
+  size = "md"
+}: {
+  name: string;
+  preset: AgentAvatarPreset;
+  themeClass: string;
+  size?: "sm" | "md" | "lg";
+}) {
+  const sizeClass =
+    size === "lg"
+      ? "h-[4.5rem] w-[4.5rem] rounded-[24px]"
+      : size === "sm"
+        ? "h-11 w-11 rounded-[16px]"
+        : "h-12 w-12 rounded-[18px]";
+  const monogram = getAgentMonogram(name);
+  const chipClass = size === "lg" ? "bottom-1.5 right-1.5 px-1.5 py-0.5 text-[9px]" : "bottom-1 right-1 px-1 py-0 text-[8px]";
+
+  return (
+    <div className={cn("relative overflow-hidden border", sizeClass, themeClass)}>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.9),transparent_62%)]" />
+      {preset === "core" ? (
+        <>
+          <div className="absolute inset-[22%] rounded-full border border-ink/12" />
+          <div className="absolute inset-0 grid place-items-center">
+            <div className="h-5 w-5 rounded-full bg-ink/78" />
+          </div>
+        </>
+      ) : null}
+      {preset === "orbit" ? (
+        <>
+          <div className="absolute inset-[20%] rounded-full border border-ink/16" />
+          <div className="absolute left-[28%] top-[28%] h-4 w-4 rounded-full bg-ink/72" />
+          <div className="absolute right-[24%] top-[22%] h-2.5 w-2.5 rounded-full bg-ink/40" />
+        </>
+      ) : null}
+      {preset === "signal" ? (
+        <div className="absolute inset-0 flex items-end justify-center gap-1 px-3 pb-3">
+          <span className="w-1.5 rounded-full bg-ink/40" style={{ height: "34%" }} />
+          <span className="w-1.5 rounded-full bg-ink/58" style={{ height: "52%" }} />
+          <span className="w-1.5 rounded-full bg-ink/76" style={{ height: "72%" }} />
+          <span className="w-1.5 rounded-full bg-ink/58" style={{ height: "46%" }} />
+        </div>
+      ) : null}
+      {preset === "grid" ? (
+        <div className="absolute inset-0 grid grid-cols-2 gap-1 p-3">
+          <span className="rounded-[6px] bg-ink/76" />
+          <span className="rounded-[6px] bg-ink/40" />
+          <span className="rounded-[6px] bg-ink/52" />
+          <span className="rounded-[6px] bg-ink/22" />
+        </div>
+      ) : null}
+      <span className={cn("absolute rounded-full border border-ink/10 bg-white font-semibold tracking-[0.08em] text-ink", chipClass)}>
+        {monogram}
+      </span>
+    </div>
+  );
+}
+
+function dockPanelCopy(locale: AppLocale) {
+  return locale === "ko"
+    ? {
+        stageNotice: "메시지를 보내면 적합한 AI가 먼저 답하고, 필요하면 조사까지 이어집니다.",
+        liveScriptEyebrow: "라이브 스크립트",
+        liveScriptTitle: "회의 대화",
+        liveScriptDescription: "메인 발표 흐름과 실제 채팅을 한 스트림으로 정리합니다.",
+        autoRouting: "AI 자동 라우팅",
+        userCameraEyebrow: "내 카메라",
+        userCameraTitle: "내 화면",
+        userCameraDescription: "회의 우측 하단에 고정되는 로컬 카메라 화면입니다.",
+        dockEyebrow: "도킹 패널",
+        dockTitle: "편집 / 회의록 / 조사기록",
+        dockDescription: "브라우저 디버거처럼 우측에 붙어 있는 보조 패널입니다.",
+        dockTabs: {
+          session: "편집",
+          minutes: "회의록",
+          research: "조사기록"
+        } satisfies Record<DockTab, string>,
+        dockOpen: "도크 열림",
+        dockClosed: "도크 닫힘",
+        openDock: "열기",
+        closeDock: "접기",
+        personaEyebrow: "AI 페르소나",
+        personaTitle: "이름 / 말투 / 아바타",
+        personaDescription: "서윤과 이안의 노출 이름, 말투, 아바타 프리셋, 이미지 톤을 바꿉니다.",
+        displayNameLabel: "이름",
+        toneLabel: "말투",
+        avatarLabel: "아바타",
+        avatarToneLabel: "이미지 톤",
+        resetPersona: "기본값 복원",
+        sessionActivity: "편집 로그",
+        sessionEmpty: "아직 편집 기록이 없습니다.",
+        sessionWorkspace: "현재 시장",
+        sessionParticipants: "참여 화면",
+        sessionSavedAt: "마지막 회의록",
+        localeLabel: "언어",
+        openSettings: "설정",
+        minutesHistory: "저장된 회의록",
+        researchNotes: "조사 메모",
+        researchHistory: "조사 히스토리",
+        researchStatus: "조사 상태",
+        marketHubEyebrow: "금융 허브",
+        marketHubDescription: "시장 선택은 왼쪽, 대화와 판단은 오른쪽에 집중합니다.",
+        meetingOverviewTitle: "OpenClaw 전략 회의실"
+      }
+    : {
+        stageNotice: "Send a message and the right AI will answer first, then research if needed.",
+        liveScriptEyebrow: "Live script",
+        liveScriptTitle: "Meeting conversation",
+        liveScriptDescription: "Keep the on-stage discussion and the real chat in one stream.",
+        autoRouting: "Auto routing",
+        userCameraEyebrow: "My camera",
+        userCameraTitle: "Local view",
+        userCameraDescription: "Your local camera stays pinned in the lower-right area.",
+        dockEyebrow: "Docked panel",
+        dockTitle: "Edit / Minutes / Research",
+        dockDescription: "A right dock styled like a browser debugger.",
+        dockTabs: {
+          session: "Edit",
+          minutes: "Minutes",
+          research: "Research"
+        } satisfies Record<DockTab, string>,
+        dockOpen: "Dock open",
+        dockClosed: "Dock closed",
+        openDock: "Open",
+        closeDock: "Collapse",
+        personaEyebrow: "AI persona",
+        personaTitle: "Name / tone / avatar",
+        personaDescription: "Change the visible name, tone, avatar preset, and image mood for Seoyun and Ian.",
+        displayNameLabel: "Name",
+        toneLabel: "Tone",
+        avatarLabel: "Avatar",
+        avatarToneLabel: "Image tone",
+        resetPersona: "Reset",
+        sessionActivity: "Edit log",
+        sessionEmpty: "No edit history yet.",
+        sessionWorkspace: "Active market",
+        sessionParticipants: "Visible participants",
+        sessionSavedAt: "Latest minutes",
+        localeLabel: "Language",
+        openSettings: "Settings",
+        minutesHistory: "Saved minutes",
+        researchNotes: "Research notes",
+        researchHistory: "Research history",
+        researchStatus: "Research status",
+        marketHubEyebrow: "Finance hub",
+        marketHubDescription: "Keep market selection on the left and decisions on the right.",
+        meetingOverviewTitle: "OpenClaw strategy room"
+      };
 }
 
 function extractHistory(items: MeetingTimelineItem[]): ChatHistoryItem[] {
@@ -129,12 +525,17 @@ function findLatestAgentMessage(items: MeetingTimelineItem[], agentId: AgentId) 
   return undefined;
 }
 
-function buildMinutesMarkdown(minutes: MeetingMinutes, timeline: MeetingTimelineItem[]) {
+function buildMinutesMarkdown(
+  minutes: MeetingMinutes,
+  timeline: MeetingTimelineItem[],
+  copy: ReturnType<typeof getDictionary>,
+  tabLabels: Record<WorkspaceTab, string>
+) {
   const lines = [
     `# ${minutes.title}`,
     "",
-    `${copy.markdown.updated}: ${new Date(minutes.updatedAt).toLocaleString("ko-KR")}`,
-    `${copy.markdown.workspace}: ${TAB_LABELS[minutes.activeTab]}`,
+    `${copy.markdown.updated}: ${new Date(minutes.updatedAt).toLocaleString(copy.app.dateLocale)}`,
+    `${copy.markdown.workspace}: ${tabLabels[minutes.activeTab]}`,
     "",
     `## ${copy.markdown.summary}`,
     minutes.summary,
@@ -154,7 +555,7 @@ function buildMinutesMarkdown(minutes: MeetingMinutes, timeline: MeetingTimeline
     `## ${copy.markdown.timeline}`,
     ...timeline
       .filter((item) => item.kind === "message")
-      .map((item) => `- [${formatTime(item.ts)}] ${item.speakerLabel}: ${item.text}`)
+      .map((item) => `- [${formatTime(item.ts, copy.app.dateLocale)}] ${item.speakerLabel}: ${item.text}`)
   ];
 
   return lines.join("\n");
@@ -170,7 +571,13 @@ function downloadText(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-function Sparkline({ snapshot }: { snapshot: MarketSnapshot | null }) {
+function Sparkline({
+  snapshot,
+  copy
+}: {
+  snapshot: MarketSnapshot | null;
+  copy: ReturnType<typeof getDictionary>;
+}) {
   const points = snapshot?.sparkline ?? [];
   if (points.length === 0) {
     return <div className="rounded-[18px] border border-dashed border-ink/10 p-4 text-xs text-mist">{copy.meeting.noIntradaySparkline}</div>;
@@ -194,29 +601,114 @@ function Sparkline({ snapshot }: { snapshot: MarketSnapshot | null }) {
   );
 }
 
-function QuoteList({ title, quotes }: { title: string; quotes: MarketSnapshot["watchlist"] | MarketSnapshot["indices"] }) {
+function MarketQuoteCard({
+  quote,
+  copy,
+  locale
+}: {
+  quote: MarketSnapshot["watchlist"][number];
+  copy: ReturnType<typeof getDictionary>;
+  locale: string;
+}) {
+  const isPositive = quote.changePercent >= 0;
+  const borderClass = isPositive ? "border-mint/18" : "border-rose/16";
+  const signalClass = isPositive ? "bg-mint" : "bg-rose";
+  const progressWidth = `${clamp(Math.abs(quote.changePercent) * 8, 12, 100)}%`;
+
   return (
-    <div className="space-y-2">
-      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{title}</div>
-      {quotes.map((quote) => (
-        <div key={quote.symbol} className="rounded-[18px] border border-ink/10 bg-white/75 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-medium">{quote.name}</div>
-              <div className="text-xs text-mist">{quote.symbol}</div>
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-[28px] border bg-white p-5 shadow-[0_16px_32px_rgba(18,24,36,0.06)]",
+        borderClass
+      )}
+    >
+      <div className="relative">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-ink/10 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink">
+                {quote.symbol}
+              </span>
+              <span className="rounded-full border border-ink/10 bg-white px-2.5 py-1 text-[11px] font-medium text-mist">
+                {quote.market}
+              </span>
             </div>
-            <div className="text-right">
-              <div className="font-semibold">{formatCurrency(quote.price, quote.currency)}</div>
-              <div className={cn("text-xs", quote.changePercent >= 0 ? "text-mint" : "text-rose")}>
-                {formatSignedPercent(quote.changePercent)}
-              </div>
+            <div className="mt-3 truncate text-lg font-semibold text-ink">{quote.name}</div>
+          </div>
+          <div className="rounded-[22px] border border-ink/10 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(18,24,36,0.04)] sm:min-w-[148px] sm:text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.marketChange}</div>
+            <div className={cn("mt-2 text-xl font-semibold leading-none sm:text-2xl", isPositive ? "text-mint" : "text-rose")}>
+              {formatSignedPercent(quote.changePercent)}
+            </div>
+            <div className={cn("mt-1 text-xs font-medium", isPositive ? "text-mint" : "text-rose")}>
+              {formatSignedNumber(quote.change, quote.currency === "KRW" ? 0 : 2, locale)}
             </div>
           </div>
         </div>
-      ))}
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-[2rem] font-semibold leading-none text-ink md:text-3xl">
+              {formatCurrency(quote.price, quote.currency, locale)}
+            </div>
+            <div className="mt-2 text-sm text-mist">{quote.market}</div>
+          </div>
+          <div className="rounded-[18px] border border-ink/10 bg-white px-3 py-2 sm:min-w-[96px] sm:text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.marketReferenceTime}</div>
+            <div className="mt-1 text-sm font-medium text-ink">{formatTime(quote.updatedAt, locale)}</div>
+          </div>
+        </div>
+        <div className="mt-4">
+          <div className="h-2 rounded-full bg-ink/6">
+            <div className={cn("h-2 rounded-full", signalClass)} style={{ width: progressWidth }} />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-[18px] border border-ink/10 bg-white px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.marketPreviousClose}</div>
+            <div className="mt-1 text-sm font-medium text-ink">
+              {quote.previousClose ? formatCurrency(quote.previousClose, quote.currency, locale) : "--"}
+            </div>
+          </div>
+          <div className="rounded-[18px] border border-ink/10 bg-white px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.marketVolume}</div>
+            <div className="mt-1 text-sm font-medium text-ink">{formatMarketVolume(quote.volume, locale)}</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+function MarketQuoteSection({
+  title,
+  quotes,
+  copy,
+  locale
+}: {
+  title: string;
+  quotes: MarketSnapshot["watchlist"] | MarketSnapshot["indices"];
+  copy: ReturnType<typeof getDictionary>;
+  locale: string;
+}) {
+  if (quotes.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{title}</div>
+        <Badge variant="secondary">{quotes.length}</Badge>
+      </div>
+      <div className="grid gap-3">
+        {quotes.map((quote) => (
+          <MarketQuoteCard key={quote.symbol} quote={quote} copy={copy} locale={locale} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 
 function SectionHeader({
   eyebrow,
@@ -261,10 +753,10 @@ function OverviewMetric({
     <div
       className={cn(
         "metric-panel rounded-[24px] border p-4",
-        tone === "default" && "border-ink/10 bg-white/82",
-        tone === "cobalt" && "border-cobalt/12 bg-cobalt/5",
-        tone === "mint" && "border-mint/12 bg-mint/5",
-        tone === "ember" && "border-ember/14 bg-ember/5"
+        tone === "default" && "border-ink/10 bg-white",
+        tone === "cobalt" && "border-cobalt/12 bg-white",
+        tone === "mint" && "border-mint/12 bg-white",
+        tone === "ember" && "border-ember/14 bg-white"
       )}
     >
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{label}</div>
@@ -274,48 +766,141 @@ function OverviewMetric({
   );
 }
 
+function SnapshotStatTile({
+  label,
+  value,
+  detail,
+  accent = "default"
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  accent?: "default" | "positive" | "negative";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-[22px] border bg-white px-4 py-4 shadow-[0_12px_24px_rgba(18,24,36,0.05)]",
+        accent === "default" && "border-ink/10",
+        accent === "positive" && "border-mint/18",
+        accent === "negative" && "border-rose/18"
+      )}
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{label}</div>
+      <div className="mt-3 text-lg font-semibold leading-none text-ink">{value}</div>
+      {detail ? <div className="mt-2 text-xs text-mist">{detail}</div> : null}
+    </div>
+  );
+}
+
 function SnapshotOverview({
   snapshot,
-  activeTab
+  activeTab,
+  copy,
+  locale,
+  tabLabels
 }: {
   snapshot: MarketSnapshot | null;
   activeTab: WorkspaceTab;
+  copy: ReturnType<typeof getDictionary>;
+  locale: AppLocale;
+  tabLabels: Record<WorkspaceTab, string>;
 }) {
   const heroQuote = snapshot?.watchlist?.[0] ?? snapshot?.indices?.[0];
+  const intlLocale = copy.app.dateLocale;
+  const providerLabel = getMarketProviderLabel(snapshot, copy);
+  const headline = getMarketHeadline(snapshot, activeTab, copy, tabLabels);
+  const heroAccent =
+    activeTab === "btc"
+      ? "bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.34),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(234,88,12,0.26),transparent_28%),linear-gradient(135deg,rgba(18,24,36,0.98),rgba(82,44,18,0.92))]"
+      : activeTab === "kr"
+        ? "bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.22),transparent_28%),linear-gradient(135deg,rgba(15,23,42,0.98),rgba(18,60,74,0.9))]"
+        : "bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(96,165,250,0.18),transparent_28%),linear-gradient(135deg,rgba(18,24,36,0.98),rgba(28,46,92,0.92))]";
+  const isPositive = (heroQuote?.changePercent ?? 0) >= 0;
+  const priceChangeDetail = heroQuote
+    ? `${formatSignedPercent(heroQuote.changePercent)} · ${formatSignedNumber(heroQuote.change, heroQuote.currency === "KRW" ? 0 : 2, intlLocale)}`
+    : getSnapshotMetaDetail(snapshot, locale) || providerLabel;
+  const normalizedPriceChangeDetail = priceChangeDetail.replace("쨌", "·");
 
   return (
-    <div className="mb-4 overflow-hidden rounded-[28px] border border-ink/10 bg-[linear-gradient(135deg,rgba(18,24,36,0.96),rgba(32,54,103,0.88))] p-5 text-white shadow-panel">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{copy.meeting.tabBadge(TAB_LABELS[activeTab])}</Badge>
+    <div className={cn("mb-4 overflow-hidden rounded-[30px] border border-ink/10 p-6 text-white shadow-panel", heroAccent)}>
+      <div className="grid gap-4">
+        <div className="relative">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{copy.meeting.tabBadge(tabLabels[activeTab])}</Badge>
             <Badge variant="outline" className="border-white/12 bg-white/10 text-white">
-              {labelForBadge(snapshot?.status || "loading")}
+              {labelForBadge(snapshot?.status || "loading", locale)}
             </Badge>
+            {snapshot?.session && snapshot.session !== "always" ? (
+              <Badge variant="outline" className="border-white/12 bg-white/10 text-white">
+                {labelForMarketSession(snapshot.session, locale)}
+              </Badge>
+            ) : null}
+            {snapshot?.status === "live" ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white">
+                <span className="h-2 w-2 rounded-full bg-mint shadow-[0_0_12px_rgba(16,185,129,0.9)]" />
+                {labelForBadge("live", locale)}
+              </span>
+            ) : null}
           </div>
-          <div className="font-display text-[2rem] leading-none">
-            {snapshot?.headline || copy.meeting.workspaceTitle}
+          <div className="font-display text-[2.2rem] leading-none md:text-[2.8rem]">
+            {headline}
           </div>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-white/72">
-            {snapshot?.notes?.[0] || copy.meeting.noFeedNotes}
-          </p>
+          <div className="mt-6 flex flex-wrap items-end gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/52">
+                {heroQuote?.name || copy.meeting.marketOverview}
+              </div>
+              <div className="mt-3 text-[2.35rem] font-semibold leading-none tracking-[-0.04em] md:text-[3.25rem]">
+                {heroQuote
+                  ? formatCurrency(heroQuote.price, heroQuote.currency, intlLocale)
+                  : labelForBadge(snapshot?.status || "loading", locale)}
+              </div>
+            </div>
+            <div
+              className={cn(
+                "self-start rounded-full px-4 py-2 text-sm font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]",
+                isPositive ? "bg-mint/14 text-mint" : "bg-rose/16 text-rose"
+              )}
+            >
+              {normalizedPriceChangeDetail}
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2 text-xs text-white/68">
+            <span className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5">{providerLabel}</span>
+            <span className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5">
+              {describeMarketSession(snapshot?.session, locale) || labelForBadge(snapshot?.status || "ready", locale)}
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5">
+              {getSnapshotUpdatedLabel(snapshot, locale, copy.markdown.updated)} {snapshot?.updatedAt ? formatTime(snapshot.updatedAt, intlLocale) : "--:--"}
+            </span>
+          </div>
         </div>
-        <div className="grid min-w-[240px] gap-2 sm:grid-cols-2">
-          <OverviewMetric
-            label={heroQuote?.name || copy.meeting.marketSnapshot}
-            value={
-              heroQuote
-                ? formatCurrency(heroQuote.price, heroQuote.currency)
-                : labelForBadge(snapshot?.status || "loading")
-            }
-            detail={heroQuote ? formatSignedPercent(heroQuote.changePercent) : snapshot?.provider || "demo"}
-            tone="cobalt"
+        <div className="grid gap-3">
+          <SnapshotStatTile
+            label={copy.meeting.marketPulse}
+            value={labelForBadge(snapshot?.status || "loading", locale)}
+            detail={labelForMarketSession(snapshot?.session, locale) || providerLabel}
+            accent={isPositive ? "positive" : "negative"}
           />
-          <OverviewMetric
-            label={copy.markdown.updated}
-            value={snapshot?.updatedAt ? formatTime(snapshot.updatedAt) : "--:--"}
-            detail={snapshot?.provider || "demo"}
-            tone="default"
+          <SnapshotStatTile
+            label={copy.meeting.marketSource}
+            value={providerLabel}
+            detail={snapshot?.updatedAt ? formatTime(snapshot.updatedAt, intlLocale) : "--:--"}
+          />
+          <SnapshotStatTile
+            label={copy.meeting.marketPreviousClose}
+            value={
+              heroQuote?.previousClose
+                ? formatCurrency(heroQuote.previousClose, heroQuote.currency, intlLocale)
+                : "--"
+            }
+            detail={heroQuote?.symbol || copy.meeting.marketSnapshot}
+          />
+          <SnapshotStatTile
+            label={copy.meeting.marketVolume}
+            value={formatMarketVolume(heroQuote?.volume, intlLocale)}
+            detail={heroQuote?.market || copy.meeting.marketWatch}
           />
         </div>
       </div>
@@ -323,7 +908,7 @@ function SnapshotOverview({
   );
 }
 
-function TimelineEntry({ item }: { item: MeetingTimelineItem }) {
+function TimelineEntry({ item, locale = DEFAULT_LOCALE }: { item: MeetingTimelineItem; locale?: AppLocale }) {
   const isUser = item.speakerType === "user";
   const isAgent = item.speakerType === "agent";
   const isTask = item.kind === "task";
@@ -332,16 +917,16 @@ function TimelineEntry({ item }: { item: MeetingTimelineItem }) {
     <div
       className={cn(
         "relative overflow-hidden rounded-[24px] border p-4 shadow-[0_14px_36px_rgba(18,24,36,0.05)]",
-        isUser && "border-ink/80 bg-ink text-white",
-        isAgent && "border-cobalt/12 bg-cobalt/5",
-        isTask && "border-ember/14 bg-ember/5",
-        !isUser && !isAgent && !isTask && "border-ink/10 bg-white/82"
+        isUser && "border-ink/28 bg-white text-ink",
+        isAgent && "border-cobalt/12 bg-white",
+        isTask && "border-ember/14 bg-white",
+        !isUser && !isAgent && !isTask && "border-ink/10 bg-white"
       )}
     >
       <span
         className={cn(
           "absolute inset-y-4 left-3 w-1 rounded-full",
-          isUser && "bg-white/32",
+          isUser && "bg-ink/22",
           isAgent && "bg-cobalt/55",
           isTask && "bg-ember/55",
           !isUser && !isAgent && !isTask && "bg-ink/12"
@@ -349,23 +934,23 @@ function TimelineEntry({ item }: { item: MeetingTimelineItem }) {
       />
       <div className="pl-4">
         <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em]">
-          <span className={cn(isUser ? "text-white/72" : "text-mist")}>{formatTime(item.ts)}</span>
-          <span className={cn(isUser ? "text-white/86" : "text-ink/72")}>{item.speakerLabel}</span>
+          <span className="text-mist">{formatTime(item.ts, getDictionary(locale).app.dateLocale)}</span>
+          <span className="text-ink/72">{item.speakerLabel}</span>
           {item.badge ? (
             <Badge
               variant="outline"
               className={cn(
-                isUser && "border-white/15 bg-white/10 text-white",
+                isUser && "border-ink/12 bg-white text-ink",
                 isAgent && "border-cobalt/14 bg-cobalt/10 text-cobalt",
                 isTask && "border-ember/14 bg-ember/12 text-ember"
               )}
             >
-              {labelForBadge(item.badge)}
+              {labelForBadge(item.badge, locale)}
             </Badge>
           ) : null}
           {isAgent && item.provider ? <Badge variant="secondary">{item.provider}</Badge> : null}
         </div>
-        <div className={cn("whitespace-pre-wrap text-sm leading-6", isUser ? "text-white" : "text-ink/90")}>
+        <div className="whitespace-pre-wrap text-sm leading-6 text-ink/90">
           {item.text}
         </div>
       </div>
@@ -373,22 +958,1185 @@ function TimelineEntry({ item }: { item: MeetingTimelineItem }) {
   );
 }
 
-export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | null }) {
+function BroadcastSpeakerCard({
+  agent,
+  status,
+  latestMessage,
+  locale
+}: {
+  agent: ReturnType<typeof getAgents>[number];
+  status: AgentStatus;
+  latestMessage: string;
+  locale: AppLocale;
+}) {
+  const copy = getDictionary(locale);
+  const theme = PERSONA_AVATAR_THEMES[agent.avatarVariant];
+
+  return (
+    <div
+      className={cn(
+        "relative flex min-h-[320px] flex-col justify-between overflow-hidden rounded-[30px] border border-ink/10 p-5 text-ink shadow-[0_22px_48px_rgba(18,24,36,0.08)]",
+        theme.shellClass,
+        status === "thinking" && "status-ring-thinking",
+        status === "speaking" && "status-ring-speaking",
+        status === "browsing" && "status-ring-browsing",
+        status === "idle" && "status-ring-idle"
+      )}
+    >
+      <div className={cn("pointer-events-none absolute -right-16 top-8 h-44 w-44 rounded-full blur-3xl", theme.haloClass)} />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className={cn("rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] backdrop-blur-md", theme.badgeClass)}>
+          {agent.title}
+        </div>
+        <Badge variant="outline" className="border-ink/10 bg-white text-ink">
+          {copy.agentStatus[status]}
+        </Badge>
+      </div>
+        <div className="relative mt-8 flex flex-1 flex-col justify-between gap-6">
+          <div className="flex items-start gap-4">
+            <AgentAvatarBadge name={agent.name} preset={agent.avatarPreset} themeClass={theme.avatarClass} size="lg" />
+          <div className="min-w-0 space-y-2">
+            <div className="font-display text-[2.15rem] leading-none">{agent.name}</div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-mist">{agent.tagline}</div>
+            <div className="line-clamp-2 rounded-[18px] border border-ink/10 bg-white px-3 py-2 text-[11px] leading-5 text-ink/72">
+              {agent.toneStyle}
+            </div>
+          </div>
+        </div>
+        <div className="rounded-[26px] border border-ink/10 bg-white/90 p-5">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{agent.emoji}</div>
+          <p className="line-clamp-5 text-sm leading-6 text-ink/84">{latestMessage}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MeetingScriptConsolePanel({
+  copy,
+  locale,
+  timeline,
+  input,
+  isSending,
+  composerRef,
+  onInputChange,
+  onComposerKeyDown,
+  onSend,
+  onReset
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  timeline: MeetingTimelineItem[];
+  input: string;
+  isSending: boolean;
+  composerRef: RefObject<HTMLTextAreaElement>;
+  onInputChange: (value: string) => void;
+  onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSend: () => void;
+  onReset: () => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+  const timelineItems = timeline ?? [];
+  const scriptEntries = timelineItems.filter((item) => item.kind === "message").slice(-10);
+
+  return (
+    <div className="flex min-h-0 flex-col rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_24px_56px_rgba(18,24,36,0.08)]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="section-kicker">{panelCopy.liveScriptEyebrow}</div>
+          <div className="font-display text-2xl leading-none text-ink">{panelCopy.liveScriptTitle}</div>
+          <p className="max-w-3xl text-sm text-mist">{panelCopy.liveScriptDescription}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{panelCopy.autoRouting}</Badge>
+          <Badge variant="outline">{copy.meeting.participants(3)}</Badge>
+        </div>
+      </div>
+
+      <ScrollArea className="meeting-column-scroll min-h-0 flex-1 rounded-[26px] border border-ink/10 bg-white p-3">
+        <div className="space-y-3">
+          {scriptEntries.length > 0 ? (
+            scriptEntries.map((item) => {
+              const isUser = item.speakerType === "user";
+              const isAgent = item.speakerType === "agent";
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "max-w-[92%] rounded-[24px] border px-4 py-3 shadow-[0_14px_34px_rgba(18,24,36,0.04)]",
+                    isUser && "ml-auto border-ink/28 bg-white text-ink",
+                    isAgent && "mr-auto border-cobalt/12 bg-white text-ink",
+                    !isUser && !isAgent && "mr-auto border-ink/10 bg-white text-ink"
+                  )}
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-mist">{item.speakerLabel}</span>
+                      {item.badge ? <Badge variant="outline">{labelForBadge(item.badge, locale)}</Badge> : null}
+                    </div>
+                    <span className="text-mist">{formatTime(item.ts, copy.app.dateLocale)}</span>
+                  </div>
+                  <div className="whitespace-pre-wrap text-sm leading-6 text-ink/88">{item.text}</div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="rounded-[22px] border border-dashed border-ink/12 bg-white/55 px-4 py-10 text-center text-sm text-mist">
+              {copy.meeting.timelineEmpty}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+
+      <form
+        className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_136px]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSend();
+        }}
+      >
+        <div className="min-w-0 rounded-[28px] border border-cobalt/10 bg-white p-3 shadow-[0_18px_42px_rgba(18,24,36,0.05)]">
+          <Textarea
+            ref={composerRef}
+            value={input}
+            onChange={(event) => onInputChange(event.target.value)}
+            onKeyDown={onComposerKeyDown}
+            placeholder={
+              locale === "ko"
+                ? "지금 보고 있는 시장, 종목, 포지션에 대해 메시지를 보내보세요."
+                : "Ask about the market, instrument, or position you are watching right now."
+            }
+            disabled={isSending}
+            rows={4}
+            autoFocus
+            className="max-h-[220px] min-h-[120px] resize-none border-0 bg-transparent px-2 py-1 shadow-none focus:border-0 focus:ring-0"
+          />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-mist">
+            <span>{copy.meeting.enterHint}</span>
+            <span>{panelCopy.stageNotice}</span>
+          </div>
+        </div>
+        <div className="flex gap-3 xl:flex-col">
+          <Button type="submit" disabled={isSending || !input.trim()} className="h-14 flex-1 rounded-[24px] xl:flex-none">
+            <span className="text-base font-semibold">{isSending ? copy.meeting.runningMeeting : copy.meeting.runMeeting}</span>
+          </Button>
+          <Button type="button" variant="destructive" onClick={onReset} className="h-14 flex-1 rounded-[24px] xl:flex-none">
+            <span className="text-base font-semibold">{copy.meeting.reset}</span>
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function UserCameraDockCard({
+  locale,
+  copy,
+  cameraReady,
+  videoRef,
+  snapshotUpdatedAt
+}: {
+  locale: AppLocale;
+  copy: MeetingCopy;
+  cameraReady: boolean;
+  videoRef: RefObject<HTMLVideoElement>;
+  snapshotUpdatedAt: string;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+
+  return (
+    <div className="rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_22px_52px_rgba(18,24,36,0.08)]">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="section-kicker">{panelCopy.userCameraEyebrow}</div>
+          <div className="font-display text-[1.8rem] leading-none text-ink">{panelCopy.userCameraTitle}</div>
+          <p className="text-sm leading-6 text-mist">{panelCopy.userCameraDescription}</p>
+        </div>
+        <Badge variant="outline">{snapshotUpdatedAt}</Badge>
+      </div>
+      <div className="relative overflow-hidden rounded-[26px] border border-ink/10 bg-white">
+        <div className="relative aspect-[16/10]">
+          <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+          {!cameraReady ? (
+            <div className="absolute inset-0 grid place-items-center bg-white px-5 text-center text-sm text-ink/72">
+              {copy.meeting.cameraFallback}
+            </div>
+          ) : null}
+          <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+            <Badge>{copy.meeting.userLabel}</Badge>
+            <Badge variant="secondary">{copy.meeting.localCam}</Badge>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ParticipantStagePanel({
+  copy,
+  locale,
+  agents,
+  agentStatus,
+  latestMessages,
+  cameraReady,
+  videoRef,
+  activeTabLabel,
+  snapshotStatusLabel,
+  snapshotDetail,
+  snapshotUpdatedAt,
+  timeline,
+  input,
+  isSending,
+  composerRef,
+  onInputChange,
+  onComposerKeyDown,
+  onSend,
+  onReset
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  agents: ReturnType<typeof getAgents>;
+  agentStatus: Record<AgentId, AgentStatus>;
+  latestMessages: Record<AgentId, string>;
+  cameraReady: boolean;
+  videoRef: RefObject<HTMLVideoElement>;
+  activeTabLabel: string;
+  snapshotStatusLabel: string;
+  snapshotDetail: string;
+  snapshotUpdatedAt: string;
+  timeline: MeetingTimelineItem[];
+  input: string;
+  isSending: boolean;
+  composerRef: RefObject<HTMLTextAreaElement>;
+  onInputChange: (value: string) => void;
+  onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSend: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <Card className="p-4 lg:p-5">
+      <SectionHeader
+        eyebrow={copy.meeting.stageEyebrow}
+        title={copy.meeting.stageTitle}
+        badge={
+          <>
+            <Badge variant="secondary">{copy.meeting.participants(agents.length + 1)}</Badge>
+            <Badge variant="outline">{activeTabLabel}</Badge>
+            <Badge variant="outline">{snapshotStatusLabel}</Badge>
+          </>
+        }
+        description={snapshotDetail}
+      />
+      <div className="grid gap-4">
+        <div className="grid gap-4 xl:grid-cols-2">
+          {agents.map((agent) => (
+            <BroadcastSpeakerCard
+              key={agent.id}
+              agent={agent}
+              status={agentStatus[agent.id]}
+              latestMessage={latestMessages[agent.id]}
+              locale={locale}
+            />
+          ))}
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.28fr)_minmax(280px,0.72fr)]">
+          <MeetingScriptConsolePanel
+            copy={copy}
+            locale={locale}
+            timeline={timeline}
+            input={input}
+            isSending={isSending}
+            composerRef={composerRef}
+            onInputChange={onInputChange}
+            onComposerKeyDown={onComposerKeyDown}
+            onSend={onSend}
+            onReset={onReset}
+          />
+          <UserCameraDockCard
+            locale={locale}
+            copy={copy}
+            cameraReady={cameraReady}
+            videoRef={videoRef}
+            snapshotUpdatedAt={snapshotUpdatedAt}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ResearchWorkbenchPanel({
+  copy,
+  locale,
+  selectedTask,
+  selectedArtifacts,
+  taskHistory,
+  selectedTaskId,
+  completedTaskCount,
+  onSelectTask
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  selectedTask: MeetingTask | null;
+  selectedArtifacts?: MeetingTaskArtifacts;
+  taskHistory: MeetingTask[];
+  selectedTaskId: string | null;
+  completedTaskCount: number;
+  onSelectTask: (taskId: string) => void;
+}) {
+  const screenshotUrl = selectedArtifacts?.screenshot || selectedTask?.screenshot;
+
+  return (
+    <Card className="p-4">
+      <SectionHeader
+        eyebrow={copy.meeting.openClawResearch}
+        title={copy.meeting.recentTasks}
+        badge={
+          <>
+            <Badge variant="secondary">{taskHistory.length}</Badge>
+            {taskHistory.length > 0 ? <Badge variant="outline">{completedTaskCount}</Badge> : null}
+          </>
+        }
+        description={selectedTask?.summary || copy.meeting.openClawIdle}
+      />
+      <div className="grid gap-3 2xl:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)]">
+        <div className="rounded-[26px] border border-ink/10 bg-[#101927] p-4 text-white shadow-panel">
+          <div className="mb-2 text-xs uppercase tracking-[0.2em] text-white/55">{copy.meeting.openClawResearch}</div>
+          {screenshotUrl ? (
+            <div
+              className="aspect-[16/10] min-h-[240px] rounded-[22px] border border-white/10 bg-cover bg-center"
+              style={{ backgroundImage: `url(${screenshotUrl})` }}
+            />
+          ) : (
+            <div className="grid aspect-[16/10] min-h-[240px] place-items-center rounded-[22px] border border-dashed border-white/15 text-sm text-white/60">
+              {copy.meeting.noResearchTask}
+            </div>
+          )}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.2em] text-white/55">{copy.meeting.openClawSummary}</div>
+              <div className="mt-1 text-sm text-white/80">{selectedTask?.summary || copy.meeting.openClawIdle}</div>
+            </div>
+            <Badge variant="secondary">{labelForBadge(selectedTask?.status || "standby", locale)}</Badge>
+          </div>
+          {selectedArtifacts?.notes?.length ? (
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {selectedArtifacts.notes.slice(0, 4).map((note) => (
+                <div key={note} className="rounded-[16px] border border-white/10 bg-white/6 px-3 py-2 text-sm text-white/72">
+                  {note}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="rounded-[26px] border border-ink/10 bg-white/68 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+          <div className="mb-3 flex items-center justify-between gap-2 px-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.recentTasks}</div>
+            <Badge variant="outline">{completedTaskCount}</Badge>
+          </div>
+          <ScrollArea className="meeting-column-scroll max-h-[360px] pr-1">
+            <div className="space-y-2">
+              {taskHistory.length > 0 ? (
+                taskHistory.map((task) => (
+                  <button
+                    key={task.taskId}
+                    onClick={() => onSelectTask(task.taskId)}
+                    className={cn(
+                      "w-full rounded-[20px] border px-4 py-3 text-left transition",
+                      selectedTaskId === task.taskId
+                        ? "border-cobalt/30 bg-white shadow-[0_10px_24px_rgba(44,91,245,0.08)]"
+                        : "border-ink/10 bg-white hover:bg-white"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{task.summary}</div>
+                      <Badge variant="outline">{labelForBadge(task.status, locale)}</Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-mist">{formatTime(task.updatedAt, copy.app.dateLocale)}</div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-[20px] border border-dashed border-ink/12 bg-white/55 px-4 py-6 text-center text-sm text-mist">
+                  {copy.meeting.noResearchTask}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function MeetingComposerPanel({
+  copy,
+  input,
+  isSending,
+  sttMode,
+  voiceAutoRun,
+  isListening,
+  isRecording,
+  browserSpeechSupported,
+  openAiSttSupported,
+  composerRef,
+  onInputChange,
+  onComposerKeyDown,
+  onMicAction,
+  onToggleVoiceAutoRun,
+  onRunOpenClaw,
+  onSend,
+  onReset
+}: {
+  copy: MeetingCopy;
+  input: string;
+  isSending: boolean;
+  sttMode: SpeechMode;
+  voiceAutoRun: boolean;
+  isListening: boolean;
+  isRecording: boolean;
+  browserSpeechSupported: boolean;
+  openAiSttSupported: boolean;
+  composerRef: RefObject<HTMLTextAreaElement>;
+  onInputChange: (value: string) => void;
+  onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onMicAction: () => void;
+  onToggleVoiceAutoRun: () => void;
+  onRunOpenClaw: () => void;
+  onSend: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <Card className="border border-cobalt/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(240,245,255,0.9))] p-4 shadow-[0_22px_56px_rgba(44,91,245,0.08)]">
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSend();
+        }}
+      >
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={onMicAction}
+              disabled={(sttMode === "browser" && !browserSpeechSupported) || (sttMode === "whisper" && !openAiSttSupported) || isSending}
+            >
+              {sttMode === "browser"
+                ? isListening
+                  ? copy.meeting.stopMic
+                  : voiceAutoRun
+                    ? copy.meeting.speakAndRun
+                    : copy.meeting.browserMic
+                : isRecording
+                  ? copy.meeting.stopWhisper
+                  : voiceAutoRun
+                    ? copy.meeting.whisperAndRun
+                    : copy.meeting.whisperRecord}
+            </Button>
+            <Button variant={voiceAutoRun ? "secondary" : "outline"} onClick={onToggleVoiceAutoRun}>
+              {voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}
+            </Button>
+            <Button variant="outline" onClick={onRunOpenClaw} disabled={!input.trim() || isSending}>
+              {copy.meeting.runOpenClaw}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-mist">
+            <Badge variant="secondary">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
+            <Badge variant="outline">{voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}</Badge>
+          </div>
+        </div>
+        <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_160px_124px] 2xl:items-stretch">
+          <div className="min-w-0 rounded-[30px] border border-cobalt/10 bg-white/82 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_42px_rgba(18,24,36,0.05)]">
+            <Textarea
+              ref={composerRef}
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              onKeyDown={onComposerKeyDown}
+              placeholder={copy.meeting.placeholder}
+              disabled={isSending}
+              rows={4}
+              autoFocus
+              className="max-h-[240px] min-h-[132px] resize-none border-0 bg-transparent px-2 py-1 shadow-none focus:border-0 focus:ring-0"
+            />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-mist">
+              <span>{copy.meeting.enterHint}</span>
+              <span>{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</span>
+            </div>
+          </div>
+          <Button type="submit" disabled={isSending || !input.trim()} className="h-14 rounded-[24px] 2xl:h-auto 2xl:min-h-[120px] 2xl:rounded-[28px] 2xl:flex-col 2xl:px-6">
+            <span className="text-base font-semibold">{isSending ? copy.meeting.runningMeeting : copy.meeting.runMeeting}</span>
+          </Button>
+          <Button variant="destructive" onClick={onReset} className="h-14 rounded-[24px] 2xl:h-auto 2xl:min-h-[120px] 2xl:rounded-[28px] 2xl:flex-col 2xl:px-5">
+            <span className="text-base font-semibold">{copy.meeting.reset}</span>
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function TimelineSidebar({
+  copy,
+  locale,
+  timeline,
+  minutes,
+  minutesHistory,
+  onDownloadMinutes,
+  onSelectMinutes
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  timeline: MeetingTimelineItem[];
+  minutes: MeetingMinutes | null;
+  minutesHistory: MeetingSessionRecord[];
+  onDownloadMinutes: () => void;
+  onSelectMinutes: (minutes: MeetingMinutes) => void;
+}) {
+  const timelineItems = timeline ?? [];
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col gap-3">
+      <Card className="flex min-h-0 flex-col p-4 xl:max-h-[420px]">
+        <SectionHeader
+          eyebrow={copy.meeting.timelineEyebrow}
+          title={copy.meeting.timelineTitle}
+          badge={<Badge variant="secondary">{timelineItems.length}</Badge>}
+        />
+        <ScrollArea className="meeting-column-scroll min-h-0 flex-1 rounded-[24px] border border-ink/10 bg-white/70 p-3">
+          <div className="space-y-3">
+            {timelineItems.map((item) => (
+              <TimelineEntry key={item.id} item={item} locale={locale} />
+            ))}
+          </div>
+        </ScrollArea>
+      </Card>
+      <Card className="flex min-h-0 flex-col p-4 xl:max-h-[340px]">
+        <SectionHeader
+          eyebrow={copy.meeting.minutesEyebrow}
+          title={copy.meeting.minutesTitle}
+          actions={
+            <Button size="sm" variant="outline" onClick={onDownloadMinutes} disabled={!minutes}>
+              {copy.meeting.download}
+            </Button>
+          }
+        />
+        <div className="rounded-[24px] border border-ink/10 bg-white/75 p-4 text-sm text-ink/90">
+          {minutes ? (
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.minutesSummary}</div>
+                <div className="mt-1 leading-6">{minutes.summary}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.marketSnapshot}</div>
+                {minutes.marketSnapshot.map((line) => (
+                  <div key={line} className="mt-1">
+                    - {line}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.actionItems}</div>
+                {minutes.actionItems.map((line) => (
+                  <div key={line} className="mt-1">
+                    - {line}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.tradeNotes}</div>
+                {minutes.tradeNotes.map((line) => (
+                  <div key={line} className="mt-1">
+                    - {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-mist">{copy.meeting.timelineEmpty}</div>
+          )}
+        </div>
+        <div className="mt-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.savedLocally}</div>
+          <ScrollArea className="meeting-column-scroll max-h-[180px] pr-1">
+            <div className="space-y-2">
+              {minutesHistory.map((record) => (
+                <button
+                  key={record.id}
+                  onClick={() => onSelectMinutes(record.minutes)}
+                  className="w-full rounded-[18px] border border-ink/10 bg-white/75 px-3 py-2 text-left text-sm hover:bg-white"
+                >
+                  <div className="font-medium">{record.minutes.title}</div>
+                  <div className="text-xs text-mist">{new Date(record.minutes.updatedAt).toLocaleString(copy.app.dateLocale)}</div>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function PersonaEditorCard({
+  agent,
+  locale,
+  value,
+  onChange,
+  onReset
+}: {
+  agent: ReturnType<typeof getAgents>[number];
+  locale: AppLocale;
+  value: AgentPersonaOverrides[AgentId];
+  onChange: (patch: Partial<NonNullable<AgentPersonaOverrides[AgentId]>>) => void;
+  onReset: () => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+  const theme = PERSONA_AVATAR_THEMES[agent.avatarVariant];
+
+  return (
+    <div className="rounded-[22px] border border-ink/10 bg-white/92 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <AgentAvatarBadge name={agent.name} preset={agent.avatarPreset} themeClass={theme.avatarClass} />
+          <div className="min-w-0">
+            <div className="font-medium text-ink">{agent.name}</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-mist">{agent.title}</div>
+          </div>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={onReset}>
+          {panelCopy.resetPersona}
+        </Button>
+      </div>
+      <div className="mt-4 grid gap-3">
+        <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-mist">
+          <span>{panelCopy.displayNameLabel}</span>
+          <Input
+            value={value?.displayName ?? ""}
+            onChange={(event) => onChange({ displayName: event.target.value })}
+            className="border-ink/10 bg-white text-ink placeholder:text-mist"
+          />
+        </label>
+        <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-mist">
+          <span>{panelCopy.toneLabel}</span>
+          <Textarea
+            value={value?.toneStyle ?? ""}
+            onChange={(event) => onChange({ toneStyle: event.target.value })}
+            rows={3}
+            className="min-h-[92px] resize-none border-ink/10 bg-white text-ink placeholder:text-mist"
+          />
+        </label>
+        <div className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-mist">
+          <span>{panelCopy.avatarLabel}</span>
+          <div className="grid grid-cols-4 gap-2">
+            {Object.entries(PERSONA_AVATAR_PRESETS).map(([preset, option]) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => onChange({ avatarPreset: preset as AgentAvatarPreset })}
+                className={cn(
+                  "overflow-hidden rounded-[18px] border bg-white px-2 py-3 text-center transition",
+                  agent.avatarPreset === preset ? "border-cobalt/28 shadow-[0_0_0_1px_rgba(44,91,245,0.18)]" : "border-ink/10 hover:border-ink/18"
+                )}
+              >
+                <div className="mx-auto mb-2 flex justify-center">
+                  <AgentAvatarBadge name={agent.name} preset={preset as AgentAvatarPreset} themeClass={theme.avatarClass} size="sm" />
+                </div>
+                <div className="text-[10px] font-semibold tracking-[0.14em] text-ink/72">
+                  {option.label[locale]}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-mist">
+          <span>{panelCopy.avatarToneLabel}</span>
+          <div className="grid grid-cols-4 gap-2">
+            {Object.entries(PERSONA_AVATAR_THEMES).map(([variant, option]) => (
+              <button
+                key={variant}
+                type="button"
+                onClick={() => onChange({ avatarVariant: variant as AgentAvatarVariant })}
+                className={cn(
+                  "overflow-hidden rounded-[18px] border text-left transition",
+                  agent.avatarVariant === variant ? "border-cobalt/28 shadow-[0_0_0_1px_rgba(44,91,245,0.18)]" : "border-ink/10 hover:border-ink/18"
+                )}
+              >
+                <div className={cn("h-14 w-full", option.previewClass)} />
+                <div className="px-2 py-2 text-[10px] font-semibold tracking-[0.14em] text-ink/72">
+                  {option.label[locale]}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionDockPanel({
+  copy,
+  locale,
+  agents,
+  timeline,
+  activeTabLabel,
+  latestSavedAt,
+  personas,
+  onPersonaChange,
+  onPersonaReset,
+  settingsHref,
+  onLocaleChange
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  agents: ReturnType<typeof getAgents>;
+  timeline: MeetingTimelineItem[];
+  activeTabLabel: string;
+  latestSavedAt: string;
+  personas: AgentPersonaOverrides;
+  onPersonaChange: (agentId: AgentId, patch: Partial<NonNullable<AgentPersonaOverrides[AgentId]>>) => void;
+  onPersonaReset: (agentId: AgentId) => void;
+  settingsHref?: string | null;
+  onLocaleChange: (nextLocale: AppLocale) => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+
+  return (
+    <div className="flex h-full flex-col gap-4">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionWorkspace}</div>
+          <div className="mt-2 text-sm font-medium text-ink">{activeTabLabel}</div>
+        </div>
+        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionParticipants}</div>
+          <div className="mt-2 text-sm font-medium text-ink">{copy.meeting.participants(agents.length + 1)}</div>
+        </div>
+        <div className="rounded-[20px] border border-ink/10 bg-white p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.sessionSavedAt}</div>
+          <div className="mt-2 text-sm font-medium text-ink">{latestSavedAt}</div>
+        </div>
+      </div>
+
+      <div className="rounded-[24px] border border-ink/10 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="section-kicker">{panelCopy.personaEyebrow}</div>
+            <div className="font-display text-[1.85rem] leading-none text-ink">{panelCopy.personaTitle}</div>
+            <p className="text-sm leading-6 text-mist">{panelCopy.personaDescription}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className={cn(SMALL_SELECT_CLASS_NAME, "w-auto")}
+              value={locale}
+              onChange={(event) => onLocaleChange(event.target.value as AppLocale)}
+            >
+              {SUPPORTED_LOCALES.map((entry) => (
+                <option key={entry} value={entry}>
+                  {copy.app.localeNames[entry]}
+                </option>
+              ))}
+            </select>
+            {settingsHref ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => (window.location.href = settingsHref)}>
+                {panelCopy.openSettings}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-4">
+          {agents.map((agent) => (
+            <PersonaEditorCard
+              key={agent.id}
+              agent={agent}
+              locale={locale}
+              value={personas[agent.id]}
+              onChange={(patch) => onPersonaChange(agent.id, patch)}
+              onReset={() => onPersonaReset(agent.id)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.sessionActivity}</div>
+        <ScrollArea className="meeting-column-scroll h-[260px] pr-1">
+          <div className="space-y-2">
+            {timeline.length > 0 ? (
+              [...timeline].slice(-8).reverse().map((item) => (
+                <div key={item.id} className="rounded-[18px] border border-ink/10 bg-white px-3 py-3">
+                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-mist">
+                    <span>{item.speakerLabel}</span>
+                    <span>{formatTime(item.ts, copy.app.dateLocale)}</span>
+                  </div>
+                  <div className="text-sm leading-6 text-ink/76">{item.text}</div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-[18px] border border-dashed border-ink/12 px-4 py-8 text-sm text-mist">
+                {panelCopy.sessionEmpty}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function MinutesDockPanel({
+  copy,
+  locale,
+  minutes,
+  minutesHistory,
+  onDownloadMinutes,
+  onSelectMinutes
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  minutes: MeetingMinutes | null;
+  minutesHistory: MeetingSessionRecord[];
+  onDownloadMinutes: () => void;
+  onSelectMinutes: (minutes: MeetingMinutes) => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+
+  return (
+    <div className="flex h-full flex-col gap-4">
+      <div className="rounded-[24px] border border-ink/10 bg-white p-4">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="section-kicker">{copy.meeting.minutesEyebrow}</div>
+            <div className="font-display text-[1.85rem] leading-none text-ink">{copy.meeting.minutesTitle}</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={onDownloadMinutes} disabled={!minutes}>
+            {copy.meeting.download}
+          </Button>
+        </div>
+        <div className="rounded-[20px] border border-ink/10 bg-white/92 p-4 text-sm text-ink/82">
+          {minutes ? (
+            <div className="space-y-3">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.minutesSummary}</div>
+                <div className="mt-2 leading-6">{minutes.summary}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.actionItems}</div>
+                {minutes.actionItems.map((line) => (
+                  <div key={line} className="mt-2 leading-6">
+                    - {line}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.tradeNotes}</div>
+                {minutes.tradeNotes.map((line) => (
+                  <div key={line} className="mt-2 leading-6">
+                    - {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-mist">{copy.meeting.timelineEmpty}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.minutesHistory}</div>
+        <ScrollArea className="meeting-column-scroll h-[300px] pr-1">
+          <div className="space-y-2">
+            {minutesHistory.map((record) => (
+              <button
+                key={record.id}
+                onClick={() => onSelectMinutes(record.minutes)}
+                className="w-full rounded-[18px] border border-ink/10 bg-white px-3 py-3 text-left transition hover:bg-ink/5"
+              >
+                <div className="font-medium text-ink">{record.minutes.title}</div>
+                <div className="mt-1 text-xs text-mist">{new Date(record.minutes.updatedAt).toLocaleString(copy.app.dateLocale)}</div>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function ResearchDockPanel({
+  copy,
+  locale,
+  selectedTask,
+  selectedArtifacts,
+  taskHistory,
+  selectedTaskId,
+  completedTaskCount,
+  onSelectTask
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  selectedTask: MeetingTask | null;
+  selectedArtifacts?: MeetingTaskArtifacts;
+  taskHistory: MeetingTask[];
+  selectedTaskId: string | null;
+  completedTaskCount: number;
+  onSelectTask: (taskId: string) => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+  const screenshotUrl = selectedArtifacts?.screenshot || selectedTask?.screenshot;
+
+  return (
+    <div className="flex h-full flex-col gap-4">
+      <div className="rounded-[24px] border border-ink/10 bg-white p-4 text-ink">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="section-kicker">{copy.meeting.openClawResearch}</div>
+            <div className="font-display text-[1.85rem] leading-none text-ink">{panelCopy.dockTabs.research}</div>
+          </div>
+          <Badge variant="outline">
+            {labelForBadge(selectedTask?.status || "standby", locale)}
+          </Badge>
+        </div>
+        {screenshotUrl ? (
+          <div className="aspect-[16/10] rounded-[20px] border border-ink/10 bg-cover bg-center" style={{ backgroundImage: `url(${screenshotUrl})` }} />
+        ) : (
+          <div className="grid aspect-[16/10] place-items-center rounded-[20px] border border-dashed border-ink/12 text-sm text-mist">
+            {copy.meeting.noResearchTask}
+          </div>
+        )}
+        <div className="mt-4 text-sm leading-6 text-ink/78">{selectedTask?.summary || copy.meeting.openClawIdle}</div>
+        {selectedArtifacts?.notes?.length ? (
+          <div className="mt-4 grid gap-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">{panelCopy.researchNotes}</div>
+            {selectedArtifacts.notes.slice(0, 4).map((note) => (
+              <div key={note} className="rounded-[16px] border border-ink/10 bg-white/92 px-3 py-2 text-sm text-ink/72">
+                {note}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.researchHistory}</div>
+          <Badge variant="outline">{completedTaskCount}</Badge>
+        </div>
+        <ScrollArea className="meeting-column-scroll h-[300px] pr-1">
+          <div className="space-y-2">
+            {taskHistory.length > 0 ? (
+              taskHistory.map((task) => (
+                <button
+                key={task.taskId}
+                  onClick={() => onSelectTask(task.taskId)}
+                  className={cn(
+                    "w-full rounded-[18px] border px-3 py-3 text-left transition",
+                    selectedTaskId === task.taskId ? "border-cobalt/28 bg-cobalt/6" : "border-ink/10 bg-white hover:bg-ink/5"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-ink">{task.summary}</div>
+                    <Badge variant="outline">
+                      {labelForBadge(task.status, locale)}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-xs text-mist">{formatTime(task.updatedAt, copy.app.dateLocale)}</div>
+                </button>
+              ))
+            ) : (
+              <div className="rounded-[18px] border border-dashed border-ink/12 px-4 py-8 text-sm text-mist">
+                {copy.meeting.noResearchTask}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function MeetingDebuggerDock({
+  copy,
+  locale,
+  open,
+  activeTab,
+  onToggle,
+  onTabChange,
+  agents,
+  timeline,
+  activeTabLabel,
+  latestSavedAt,
+  personas,
+  selectedTask,
+  selectedArtifacts,
+  taskHistory,
+  selectedTaskId,
+  completedTaskCount,
+  minutes,
+  minutesHistory,
+  settingsHref,
+  onPersonaChange,
+  onPersonaReset,
+  onSelectTask,
+  onDownloadMinutes,
+  onSelectMinutes,
+  onLocaleChange
+}: {
+  copy: MeetingCopy;
+  locale: AppLocale;
+  open: boolean;
+  activeTab: DockTab;
+  onToggle: () => void;
+  onTabChange: (tab: DockTab) => void;
+  agents: ReturnType<typeof getAgents>;
+  timeline: MeetingTimelineItem[];
+  activeTabLabel: string;
+  latestSavedAt: string;
+  personas: AgentPersonaOverrides;
+  selectedTask: MeetingTask | null;
+  selectedArtifacts?: MeetingTaskArtifacts;
+  taskHistory: MeetingTask[];
+  selectedTaskId: string | null;
+  completedTaskCount: number;
+  minutes: MeetingMinutes | null;
+  minutesHistory: MeetingSessionRecord[];
+  settingsHref?: string | null;
+  onPersonaChange: (agentId: AgentId, patch: Partial<NonNullable<AgentPersonaOverrides[AgentId]>>) => void;
+  onPersonaReset: (agentId: AgentId) => void;
+  onSelectTask: (taskId: string) => void;
+  onDownloadMinutes: () => void;
+  onSelectMinutes: (minutes: MeetingMinutes) => void;
+  onLocaleChange: (nextLocale: AppLocale) => void;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+
+  if (!open) {
+    return (
+      <Card className="flex min-h-0 flex-col overflow-hidden border border-ink/12 bg-white p-2 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)]">
+        <Button type="button" size="sm" variant="outline" onClick={onToggle} className="h-11 w-full rounded-[16px] border-ink/12 bg-white text-ink hover:bg-ink/5">
+          {panelCopy.openDock}
+        </Button>
+        <div className="mt-2 grid gap-2">
+          {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => {
+                onTabChange(tab);
+                onToggle();
+              }}
+              className={cn(
+                "rounded-[16px] border px-2 py-3 text-center text-[11px] font-semibold transition",
+                activeTab === tab
+                  ? "border-cobalt/24 bg-white text-ink shadow-[0_10px_24px_rgba(44,91,245,0.08)]"
+                  : "border-ink/10 bg-white text-mist hover:text-ink"
+              )}
+            >
+              {panelCopy.dockTabs[tab]}
+            </button>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="flex min-h-0 flex-col overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)]">
+      <div className="flex items-center justify-between border-b border-ink/8 px-3 py-3">
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+          {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => onTabChange(tab)}
+              className={cn(
+                "rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                activeTab === tab
+                  ? "border border-ink/20 bg-white text-ink shadow-[0_10px_24px_rgba(18,24,36,0.08)]"
+                  : "text-mist hover:bg-ink/5 hover:text-ink"
+              )}
+            >
+              {panelCopy.dockTabs[tab]}
+            </button>
+          ))}
+        </div>
+        <Button type="button" size="sm" variant="ghost" onClick={onToggle} className="text-ink hover:bg-ink/5 hover:text-ink">
+          {panelCopy.closeDock}
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden p-3">
+        {activeTab === "session" ? (
+          <SessionDockPanel
+            copy={copy}
+            locale={locale}
+            agents={agents}
+            timeline={timeline}
+            activeTabLabel={activeTabLabel}
+            latestSavedAt={latestSavedAt}
+            personas={personas}
+            onPersonaChange={onPersonaChange}
+            onPersonaReset={onPersonaReset}
+            settingsHref={settingsHref}
+            onLocaleChange={onLocaleChange}
+          />
+        ) : null}
+        {activeTab === "minutes" ? (
+          <MinutesDockPanel
+            copy={copy}
+            locale={locale}
+            minutes={minutes}
+            minutesHistory={minutesHistory}
+            onDownloadMinutes={onDownloadMinutes}
+            onSelectMinutes={onSelectMinutes}
+          />
+        ) : null}
+        {activeTab === "research" ? (
+          <ResearchDockPanel
+            copy={copy}
+            locale={locale}
+            selectedTask={selectedTask}
+            selectedArtifacts={selectedArtifacts}
+            taskHistory={taskHistory}
+            selectedTaskId={selectedTaskId}
+            completedTaskCount={completedTaskCount}
+            onSelectTask={onSelectTask}
+          />
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+export function MeetingRoom({
+  settingsHref = null,
+  locale = DEFAULT_LOCALE
+}: {
+  settingsHref?: string | null;
+  locale?: AppLocale;
+}) {
+  const copy = getDictionary(locale);
+  const experienceCopy = dockPanelCopy(locale);
+  const tabLabels = copy.tabs;
+
   const [timeline, setTimeline] = useState<MeetingTimelineItem[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [personaOverrides, setPersonaOverrides] = useState<AgentPersonaOverrides>(() => readStoredPersonas(locale));
+  const [dockOpen, setDockOpen] = useState(true);
+  const [activeDockTab, setActiveDockTab] = useState<DockTab>("session");
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
-  const [autoSpeakMode, setAutoSpeakMode] = useState<AutoSpeakMode>("summary");
-  const [voiceAutoRun, setVoiceAutoRun] = useState(true);
+  const [autoSpeakMode, setAutoSpeakMode] = useState<AutoSpeakMode>("off");
+  const [voiceAutoRun, setVoiceAutoRun] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [browserSpeechSupported, setBrowserSpeechSupported] = useState(false);
-  const [browserTtsSupported, setBrowserTtsSupported] = useState(false);
   const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
-  const [chatProvider, setChatProvider] = useState<Provider>("mock");
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("btc");
   const [btcSnapshot, setBtcSnapshot] = useState<MarketSnapshot | null>(null);
@@ -406,7 +2154,6 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
   const [taskHistory, setTaskHistory] = useState<MeetingTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [taskArtifacts, setTaskArtifacts] = useState<Record<string, MeetingTaskArtifacts>>({});
-  const [openClawSessionId, setOpenClawSessionId] = useState<string | undefined>();
   const [tradeForm, setTradeForm] = useState<TradeFormState>({
     symbol: KR_DEFAULT_SYMBOLS[0],
     side: "buy",
@@ -422,11 +2169,12 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const recordStopTimerRef = useRef<number | null>(null);
-  const taskPollRef = useRef<number | null>(null);
-  const seenTaskLogsRef = useRef<Set<string>>(new Set());
   const speechRunRef = useRef(0);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const agents = useMemo(() => getAgents(locale, personaOverrides), [locale, personaOverrides]);
+  const agentsById = useMemo(() => getAgentsById(locale, personaOverrides), [locale, personaOverrides]);
 
   const selectedSnapshot = useMemo(() => {
     if (activeTab === "btc") return btcSnapshot;
@@ -441,18 +2189,33 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
   const selectedArtifacts = selectedTask ? taskArtifacts[selectedTask.taskId] : undefined;
   const latestMessages = useMemo(
     () => ({
-      assistant: findLatestAgentMessage(timeline, "assistant") ?? AGENTS_BY_ID.assistant.role,
-      analyst: findLatestAgentMessage(timeline, "analyst") ?? AGENTS_BY_ID.analyst.role
+      assistant: findLatestAgentMessage(timeline, "assistant") ?? agentsById.assistant.role,
+      analyst: findLatestAgentMessage(timeline, "analyst") ?? agentsById.analyst.role
     }),
-    [timeline]
+    [agentsById.assistant.role, agentsById.analyst.role, timeline]
   );
   const tradeSymbols = useMemo(
     () => krSnapshot?.watchlist.map((quote) => ({ value: quote.symbol, label: `${quote.symbol} ${quote.name}` })) ?? KR_DEFAULT_SYMBOLS.map((symbol) => ({ value: symbol, label: symbol })),
     [krSnapshot]
   );
   const completedTaskCount = taskHistory.filter((task) => task.status === "succeeded").length;
-  const latestSavedAt = minutes?.updatedAt ? formatTime(minutes.updatedAt) : "--:--";
-  const snapshotUpdatedAt = selectedSnapshot?.updatedAt ? formatTime(selectedSnapshot.updatedAt) : "--:--";
+  const latestSavedAt = minutes?.updatedAt ? formatTime(minutes.updatedAt, copy.app.dateLocale) : "--:--";
+  const snapshotUpdatedAt = selectedSnapshot?.updatedAt ? formatTime(selectedSnapshot.updatedAt, copy.app.dateLocale) : "--:--";
+  const activeTabLabel = tabLabels[activeTab];
+  const selectedSnapshotSummary = getSnapshotSummary(selectedSnapshot, copy, locale);
+  const selectedSnapshotStatusLabel = labelForBadge(selectedSnapshot?.status || "loading", locale);
+  const marketStatusDotClass =
+    selectedSnapshot?.status === "live"
+      ? "bg-mint"
+      : selectedSnapshot?.status === "delayed"
+        ? "bg-amber-400"
+        : selectedSnapshot?.status === "demo"
+          ? "bg-cobalt"
+          : "bg-ink/28";
+  const meetingShellTitle = experienceCopy.meetingOverviewTitle;
+  const selectedSnapshotDetail =
+    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" · ") ||
+    selectedSnapshotSummary;
 
   useEffect(() => {
     try {
@@ -466,11 +2229,14 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
       }).SpeechRecognition ||
       (window as Window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).webkitSpeechRecognition;
       setBrowserSpeechSupported(Boolean(recognitionSource));
-      setBrowserTtsSupported("speechSynthesis" in window);
     } catch {
       setMinutesHistory([]);
     }
   }, []);
+
+  useEffect(() => {
+    persistPersonas(personaOverrides);
+  }, [personaOverrides]);
 
   useEffect(() => {
     const element = composerRef.current;
@@ -510,9 +2276,6 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
       recognitionRef.current?.stop?.();
       mediaRecorderRef.current?.stop?.();
       cancelSpeech();
-      if (taskPollRef.current) {
-        window.clearInterval(taskPollRef.current);
-      }
       if (recordStopTimerRef.current) {
         window.clearTimeout(recordStopTimerRef.current);
       }
@@ -665,6 +2428,26 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     window.localStorage.setItem(MINUTES_STORAGE_KEY, JSON.stringify(next));
   }
 
+  function updatePersona(agentId: AgentId, patch: Partial<NonNullable<AgentPersonaOverrides[AgentId]>>) {
+    setPersonaOverrides((previous) =>
+      buildPersonaState(locale, {
+        ...previous,
+        [agentId]: {
+          ...previous[agentId],
+          ...patch
+        }
+      })
+    );
+  }
+
+  function resetPersona(agentId: AgentId) {
+    const defaults = getDefaultAgentPersonas(locale);
+    setPersonaOverrides((previous) => ({
+      ...previous,
+      [agentId]: defaults[agentId]
+    }));
+  }
+
   function setOnlyStatus(agentId: AgentId, status: AgentStatus) {
     setAgentStatus({
       assistant: agentId === "assistant" ? status : "idle",
@@ -681,68 +2464,6 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     setSelectedTaskId(task.taskId);
   }
 
-  async function fetchTaskArtifacts(taskId: string) {
-    try {
-      const artifacts = await fetchJson<MeetingTaskArtifacts>(`/api/meeting/tasks/${taskId}/artifacts`);
-      setTaskArtifacts((previous) => ({ ...previous, [taskId]: artifacts }));
-    } catch {
-      setTaskArtifacts((previous) => previous);
-    }
-  }
-
-  async function startOpenClawTask(action: MeetingAction, agentId: AgentId) {
-    setOnlyStatus(agentId, "browsing");
-    setNotice(copy.meeting.notices.openClawStarting);
-
-    try {
-      const task = await fetchJson<MeetingTask>("/api/meeting/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, instruction: action.instruction, url: action.url, sessionId: openClawSessionId })
-      });
-
-      setOpenClawSessionId(task.sessionId);
-      seenTaskLogsRef.current = new Set(task.logs.map((log) => `${task.taskId}:${log.id}`));
-      upsertTask(task);
-      pushTimeline({ ts: task.updatedAt, kind: "task", speakerType: "system", speakerLabel: "OpenClaw", badge: task.status, text: task.summary });
-
-      if (taskPollRef.current) {
-        window.clearInterval(taskPollRef.current);
-      }
-      taskPollRef.current = window.setInterval(async () => {
-        try {
-          const nextTask = await fetchJson<MeetingTask>(`/api/meeting/tasks/${task.taskId}`);
-          upsertTask(nextTask);
-          setOpenClawSessionId(nextTask.sessionId);
-          nextTask.logs.forEach((log) => {
-            const key = `${nextTask.taskId}:${log.id}`;
-            if (seenTaskLogsRef.current.has(key)) return;
-            seenTaskLogsRef.current.add(key);
-            pushTimeline({ ts: log.ts, kind: "task", speakerType: "system", speakerLabel: "OpenClaw", badge: log.level, text: log.message });
-          });
-          if (nextTask.status === "succeeded" || nextTask.status === "failed") {
-            if (taskPollRef.current) {
-              window.clearInterval(taskPollRef.current);
-              taskPollRef.current = null;
-            }
-            await fetchTaskArtifacts(nextTask.taskId);
-            setNotice(nextTask.status === "succeeded" ? copy.meeting.notices.openClawCompleted : copy.meeting.notices.openClawFailed);
-            setAgentStatus({ assistant: "idle", analyst: "idle" });
-          }
-        } catch {
-          if (taskPollRef.current) {
-            window.clearInterval(taskPollRef.current);
-            taskPollRef.current = null;
-          }
-          setAgentStatus({ assistant: "idle", analyst: "idle" });
-        }
-      }, 2200);
-    } catch {
-      pushTimeline({ ts: new Date().toISOString(), kind: "task", speakerType: "system", speakerLabel: "OpenClaw", badge: "error", text: copy.meeting.notices.openClawStartFailed });
-      setAgentStatus({ assistant: "idle", analyst: "idle" });
-    }
-  }
-
   function speakBrowser(text: string, agentId: AgentId, runId: number) {
     return new Promise<void>((resolve) => {
       if (!("speechSynthesis" in window)) {
@@ -751,7 +2472,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
       }
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "ko-KR";
+      utterance.lang = copy.app.speechLocale;
       utterance.rate = 1.02;
       utterance.onstart = () => setOnlyStatus(agentId, "speaking");
       utterance.onend = () => {
@@ -842,7 +2563,9 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     }
 
     setInput(normalized);
-    setNotice(source === "browser" ? UX_COPY.voiceSubmittingBrowser : UX_COPY.voiceSubmittingWhisper);
+    setNotice(
+      source === "browser" ? copy.meeting.voiceSubmittingBrowser : copy.meeting.voiceSubmittingWhisper
+    );
     await handleSend(normalized);
   }
 
@@ -868,7 +2591,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     }
 
     const recognition = new Recognition();
-    recognition.lang = "ko-KR";
+    recognition.lang = copy.app.speechLocale;
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.onstart = () => setIsListening(true);
@@ -963,7 +2686,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     cancelSpeech();
     setIsSending(true);
     setInput("");
-    setOnlyStatus("analyst", "thinking");
+    setAgentStatus({ assistant: "thinking", analyst: "thinking" });
     const baseTimeline = [...timeline];
     const userItem = createTimelineItem({ ts: new Date().toISOString(), kind: "message", speakerType: "user", speakerLabel: copy.meeting.userLabel, badge: activeTab, text: message });
     setTimeline((previous) => [...previous, userItem]);
@@ -978,10 +2701,17 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
           activeTab,
           marketSnapshot: activeTab === "btc" ? btcSnapshot : activeTab === "us" ? usSnapshot : krSnapshot,
           portfolioSnapshot: portfolio,
-          minutes: minutes ? { ...minutes, sessionId } : null
+          minutes: minutes ? { ...minutes, sessionId } : null,
+          locale,
+          personaOverrides
         })
       });
-      setChatProvider(data.provider);
+      if (data.research) {
+        upsertTask(data.research.task);
+        setTaskArtifacts((previous) => ({ ...previous, [data.research!.task.taskId]: data.research!.artifacts }));
+        setActiveDockTab("research");
+        setDockOpen(true);
+      }
       const turnItems = data.turns.map((turn) => createTimelineItem({ ts: turn.timestamp, kind: "message", speakerType: "agent", agentId: turn.agentId, speakerLabel: turn.speakerLabel, badge: turn.phase, text: turn.text, provider: turn.provider }));
       for (const item of turnItems) {
         setTimeline((previous) => [...previous, item]);
@@ -991,11 +2721,16 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
       setAgentStatus({ assistant: "idle", analyst: "idle" });
       const nextTimeline = [...baseTimeline, userItem, ...turnItems];
       persistMeeting(data.minutes, nextTimeline, message);
-      setNotice(copy.meeting.notices.meetingCompleted(data.provider));
+      setNotice(
+        data.meta.usedResearch
+          ? locale === "ko"
+            ? `${agentsById[data.meta.finalSpeakerId].name}이 조사 내용을 반영해 답변했습니다.`
+            : `${agentsById[data.meta.finalSpeakerId].name} answered with research applied.`
+          : locale === "ko"
+            ? `${agentsById[data.meta.finalSpeakerId].name}의 답변이 도착했습니다.`
+            : `${agentsById[data.meta.finalSpeakerId].name} replied.`
+      );
       void autoplayTurns(data.turns);
-      if (data.actions?.[0]) {
-        await startOpenClawTask(data.actions[0], "analyst");
-      }
     } catch (error) {
       pushTimeline({ ts: new Date().toISOString(), kind: "message", speakerType: "system", speakerLabel: copy.meeting.systemLabel, badge: "error", text: error instanceof Error ? error.message : copy.meeting.notices.meetingFailed });
       setAgentStatus({ assistant: "idle", analyst: "idle" });
@@ -1026,8 +2761,15 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
       });
       setPortfolio(result.account);
       setOrders((previous) => [result.order, ...previous.filter((entry) => entry.id !== result.order.id)]);
-      pushTimeline({ ts: result.order.updatedAt, kind: "task", speakerType: "system", speakerLabel: copy.tabs.trading, badge: result.order.status, text: `${labelForOrderSide(result.order.side)} ${result.order.symbol} x${formatNumber(result.order.quantity)} ${labelForBadge(result.order.status)}` });
-      setNotice(copy.meeting.notices.paperOrder(labelForBadge(result.order.status)));
+      pushTimeline({
+        ts: result.order.updatedAt,
+        kind: "task",
+        speakerType: "system",
+        speakerLabel: copy.tabs.trading,
+        badge: result.order.status,
+        text: `${labelForOrderSide(result.order.side, locale)} ${result.order.symbol} x${formatNumber(result.order.quantity, 0, copy.app.dateLocale)} ${labelForBadge(result.order.status, locale)}`
+      });
+      setNotice(copy.meeting.notices.paperOrder(labelForBadge(result.order.status, locale)));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : copy.meeting.notices.paperOrderFailed);
     } finally {
@@ -1037,7 +2779,19 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
 
   function handleDownloadMinutes() {
     if (!minutes) return;
-    downloadText(`회의록-${minutes.updatedAt.slice(0, 10)}.md`, buildMinutesMarkdown(minutes, timeline));
+    downloadText(
+      copy.meeting.downloadFilename(minutes.updatedAt.slice(0, 10)),
+      buildMinutesMarkdown(minutes, timeline, copy, tabLabels)
+    );
+  }
+
+  function handleLocaleChange(nextLocale: AppLocale) {
+    if (nextLocale === locale) {
+      return;
+    }
+
+    document.cookie = `${APP_LOCALE_COOKIE}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    window.location.reload();
   }
 
   function resetMeeting() {
@@ -1048,8 +2802,8 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
     setTaskHistory([]);
     setSelectedTaskId(null);
     setTaskArtifacts({});
-    setOpenClawSessionId(undefined);
     setAgentStatus({ assistant: "idle", analyst: "idle" });
+    setActiveDockTab("session");
     setNotice(copy.meeting.notices.reset);
   }
 
@@ -1060,30 +2814,24 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{copy.meeting.headerBadge}</Badge>
-              <Badge variant="signal">{copy.meeting.fixedAgents}</Badge>
-              <Badge variant="outline">{copy.meeting.providerBadge(chatProvider)}</Badge>
-              <Badge variant="outline">{copy.meeting.tabBadge(TAB_LABELS[activeTab])}</Badge>
-              {openClawSessionId ? (
-                <Badge variant="outline">{copy.meeting.openClawBadge(openClawSessionId.slice(0, 8))}</Badge>
-              ) : null}
+              <Badge variant="signal">{experienceCopy.marketHubEyebrow}</Badge>
+              <Badge variant="outline">{copy.meeting.tabBadge(activeTabLabel)}</Badge>
             </div>
             <div className="space-y-3">
-              <h1 className="max-w-4xl font-display text-3xl font-semibold md:text-[2.8rem]">
-                {copy.meeting.title}
-              </h1>
+              <h1 className="max-w-4xl font-display text-3xl font-semibold md:text-[2.8rem]">{meetingShellTitle}</h1>
               <p className="max-w-4xl text-sm leading-6 text-mist">{notice}</p>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <OverviewMetric
-                label={copy.meeting.providerBadge(chatProvider)}
-                value={labelForBadge(selectedSnapshot?.status || "loading")}
-                detail={TAB_LABELS[activeTab]}
+                label={experienceCopy.sessionWorkspace}
+                value={activeTabLabel}
+                detail={selectedSnapshot?.headline || experienceCopy.marketHubDescription}
                 tone="cobalt"
               />
               <OverviewMetric
-                label={copy.meeting.timelineTitle}
-                value={String(timeline.length).padStart(2, "0")}
-                detail={copy.meeting.participants(AGENTS.length + 1)}
+                label={experienceCopy.sessionParticipants}
+                value={String(agents.length + 1).padStart(2, "0")}
+                detail={agents.map((agent) => agent.name).join(" · ")}
               />
               <OverviewMetric
                 label={copy.meeting.minutesTitle}
@@ -1093,110 +2841,130 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
               />
             </div>
           </div>
-          <div className="rounded-[28px] border border-ink/10 bg-white/58 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Button size="sm" variant={sttMode === "browser" ? "default" : "outline"} onClick={() => setSttMode("browser")}>
-                {copy.meeting.browserStt}
-              </Button>
-              <Button
-                size="sm"
-                variant={sttMode === "whisper" ? "default" : "outline"}
-                onClick={() => setSttMode("whisper")}
-                disabled={!capabilities?.openaiStt}
-              >
-                {copy.meeting.whisper}
-              </Button>
-              <Button size="sm" variant={ttsMode === "browser" ? "default" : "outline"} onClick={() => setTtsMode("browser")}>
-                {copy.meeting.browserTts}
-              </Button>
-              <Button
-                size="sm"
-                variant={ttsMode === "elevenlabs" ? "default" : "outline"}
-                onClick={() => setTtsMode("elevenlabs")}
-                disabled={!capabilities?.elevenLabsTts}
-              >
-                {copy.meeting.elevenLabs}
-              </Button>
+          <div className="rounded-[28px] border border-ink/10 bg-white p-4 shadow-[0_14px_34px_rgba(18,24,36,0.04)]">
+            <div className="space-y-1">
+              <div className="section-kicker">{experienceCopy.dockEyebrow}</div>
+              <div className="font-display text-2xl leading-none text-ink">{experienceCopy.dockTitle}</div>
+              <p className="text-sm leading-6 text-mist">{experienceCopy.dockDescription}</p>
             </div>
-            <div className="soft-divider mb-3" />
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
-                <Badge variant="secondary">{ttsMode === "browser" ? copy.meeting.browserTts : copy.meeting.elevenLabs}</Badge>
-                <Badge variant="outline">{voiceAutoRun ? UX_COPY.voiceAutoRunLabelOn : UX_COPY.voiceAutoRunLabelOff}</Badge>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[22px] border border-ink/10 bg-white p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{experienceCopy.sessionWorkspace}</div>
+                <div className="mt-2 text-lg font-semibold text-ink">{activeTabLabel}</div>
+                <div className="mt-1 text-sm text-mist">{selectedSnapshot?.headline || experienceCopy.marketHubDescription}</div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  className={cn(SMALL_SELECT_CLASS_NAME, "w-full sm:w-auto")}
-                  value={autoSpeakMode}
-                  onChange={(event) => setAutoSpeakMode(event.target.value as AutoSpeakMode)}
-                >
-                  <option value="summary">{copy.autoSpeak.summary}</option>
-                  <option value="all">{copy.autoSpeak.all}</option>
-                  <option value="off">{copy.autoSpeak.off}</option>
-                </select>
-                {settingsHref ? (
-                  <Button size="sm" variant="outline" onClick={() => (window.location.href = settingsHref)}>
-                    Settings
-                  </Button>
-                ) : null}
+              <div className="rounded-[22px] border border-ink/10 bg-white p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{copy.meeting.stageTitle}</div>
+                <div className="mt-2 text-lg font-semibold text-ink">{copy.meeting.participants(agents.length + 1)}</div>
+                <div className="mt-1 text-sm text-mist">{experienceCopy.stageNotice}</div>
               </div>
+            </div>
+            <div className="mt-4 rounded-[22px] border border-ink/10 bg-white p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist">{experienceCopy.dockEyebrow}</div>
+              <div className="mt-2 text-lg font-semibold text-ink">{experienceCopy.dockTabs[activeDockTab]}</div>
+              <div className="mt-1 text-sm text-mist">{dockOpen ? experienceCopy.dockDescription : `${experienceCopy.openDock} · ${experienceCopy.dockDescription}`}</div>
             </div>
           </div>
         </header>
 
-        <div className="grid flex-1 gap-3 xl:grid-cols-[360px_minmax(0,1fr)_430px]">
-          <Card className="flex min-h-0 flex-col p-4 lg:p-5">
+        <div
+          className={cn(
+            "grid flex-1 gap-3 xl:items-start",
+            dockOpen
+              ? "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_minmax(320px,360px)]"
+              : "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_112px]"
+          )}
+        >
+          <Card className="flex min-h-0 min-w-0 flex-col self-start p-4 lg:p-5 xl:max-h-[calc(100dvh-14rem)]">
             <SectionHeader
               eyebrow={copy.meeting.workspaceEyebrow}
               title={copy.meeting.workspaceTitle}
-              badge={<Badge variant="secondary">{labelForBadge(selectedSnapshot?.status || "loading")}</Badge>}
-              description={selectedSnapshot?.headline}
+              description={selectedSnapshot?.headline || experienceCopy.marketHubDescription}
             />
-            <SnapshotOverview snapshot={selectedSnapshot} activeTab={activeTab} />
-            <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {Object.entries(TAB_LABELS).map(([tab, label]) => (
-                <Button
-                  key={tab}
-                  size="sm"
-                  variant={activeTab === tab ? "default" : "outline"}
-                  onClick={() => setActiveTab(tab as WorkspaceTab)}
-                >
-                  {label}
-                </Button>
-              ))}
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-3">
+                {Object.entries(tabLabels).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab as WorkspaceTab)}
+                    className="group flex min-w-[68px] flex-col items-center gap-2 text-center"
+                  >
+                    <span
+                      className={cn(
+                        "grid h-14 w-14 place-items-center rounded-full border text-xs font-semibold uppercase tracking-[0.16em] transition",
+                        activeTab === tab
+                          ? "border-ink/80 bg-white text-ink shadow-[0_16px_36px_rgba(18,24,36,0.12)]"
+                          : "border-ink/10 bg-white text-ink shadow-[0_10px_24px_rgba(18,24,36,0.05)] group-hover:-translate-y-0.5"
+                      )}
+                    >
+                      {WORKSPACE_TAB_MONOGRAMS[tab as WorkspaceTab]}
+                    </span>
+                    <span className={cn("text-[11px] font-medium leading-4 text-mist", activeTab === tab && "text-ink")}>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-ink/10 bg-white px-3 py-2 text-xs text-ink shadow-[0_10px_24px_rgba(18,24,36,0.05)]">
+                <span className={cn("h-2.5 w-2.5 rounded-full", marketStatusDotClass)} />
+                <span className="font-semibold">{selectedSnapshotStatusLabel}</span>
+                <span className="text-mist">{snapshotUpdatedAt}</span>
+              </div>
             </div>
-            <ScrollArea className="min-h-0 flex-1 pr-1">
+            <ScrollArea className="meeting-column-scroll min-h-0 flex-1 pr-1">
               <div className="space-y-4">
                 {activeTab === "btc" ? (
                   <div className="space-y-4">
-                    <Sparkline snapshot={btcSnapshot} />
-                    <QuoteList title={copy.meeting.btckrw} quotes={btcSnapshot?.watchlist ?? []} />
+                    <Sparkline snapshot={btcSnapshot} copy={copy} />
+                    <MarketQuoteSection
+                      title={copy.meeting.btckrw}
+                      quotes={btcSnapshot?.watchlist ?? []}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
+                    />
                   </div>
                 ) : null}
                 {activeTab === "kr" ? (
                   <div className="space-y-4">
-                    <QuoteList title={copy.meeting.kospiKosdaq} quotes={krSnapshot?.indices ?? []} />
-                    <QuoteList title={copy.meeting.krWatchlist} quotes={krSnapshot?.watchlist ?? []} />
+                    <MarketQuoteSection
+                      title={copy.meeting.kospiKosdaq}
+                      quotes={krSnapshot?.indices ?? []}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
+                    />
+                    <MarketQuoteSection
+                      title={copy.meeting.krWatchlist}
+                      quotes={krSnapshot?.watchlist ?? []}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
+                    />
                   </div>
                 ) : null}
                 {activeTab === "us" ? (
                   <div className="space-y-4">
-                    <QuoteList title={copy.meeting.usProxies} quotes={usSnapshot?.indices ?? []} />
-                    <QuoteList title={copy.meeting.usWatchlist} quotes={usSnapshot?.watchlist ?? []} />
+                    <MarketQuoteSection
+                      title={copy.meeting.usProxies}
+                      quotes={usSnapshot?.indices ?? []}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
+                    />
+                    <MarketQuoteSection
+                      title={copy.meeting.usWatchlist}
+                      quotes={usSnapshot?.watchlist ?? []}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
+                    />
                   </div>
                 ) : null}
                 {activeTab === "trading" ? (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-3">
                       <OverviewMetric
                         label={copy.meeting.tradingCash}
-                        value={formatCurrency(portfolio?.cash ?? 0, portfolio?.currency || "KRW")}
+                        value={formatCurrency(portfolio?.cash ?? 0, portfolio?.currency || "KRW", copy.app.dateLocale)}
                         detail={snapshotUpdatedAt}
                       />
                       <OverviewMetric
                         label={copy.meeting.tradingEquity}
-                        value={formatCurrency(portfolio?.equity ?? 0, portfolio?.currency || "KRW")}
+                        value={formatCurrency(portfolio?.equity ?? 0, portfolio?.currency || "KRW", copy.app.dateLocale)}
                         detail={portfolio?.broker || "demo"}
                         tone="mint"
                       />
@@ -1215,7 +2983,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                             </option>
                           ))}
                         </select>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid gap-2">
                           <select
                             className={LARGE_SELECT_CLASS_NAME}
                             value={tradeForm.side}
@@ -1240,7 +3008,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                             <option value="limit">{copy.trading.orderType.limit}</option>
                           </select>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid gap-2">
                           <Input
                             value={tradeForm.quantity}
                             onChange={(event) => setTradeForm((previous) => ({ ...previous, quantity: event.target.value }))}
@@ -1262,7 +3030,7 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                         </Button>
                       </div>
                     </div>
-                    <QuoteList
+                    <MarketQuoteSection
                       title={copy.meeting.positions}
                       quotes={(portfolio?.positions ?? []).map((position) => ({
                         symbol: position.symbol,
@@ -1274,6 +3042,8 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                         currency: portfolio?.currency || "KRW",
                         updatedAt: portfolio?.updatedAt || new Date().toISOString()
                       }))}
+                      copy={copy}
+                      locale={copy.app.dateLocale}
                     />
                     <div className="space-y-2">
                       <div className="section-kicker">{copy.meeting.recentOrders}</div>
@@ -1284,16 +3054,16 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium">
-                              {order.symbol} x{formatNumber(order.quantity)}
+                              {order.symbol} x{formatNumber(order.quantity, 0, copy.app.dateLocale)}
                             </span>
-                            <Badge variant="outline">{labelForBadge(order.status)}</Badge>
+                            <Badge variant="outline">{labelForBadge(order.status, locale)}</Badge>
                           </div>
                           <div className="mt-1 text-xs text-mist">
-                            {labelForOrderSide(order.side)} {labelForOrderType(order.orderType)}{" "}
+                            {labelForOrderSide(order.side, locale)} {labelForOrderType(order.orderType, locale)}{" "}
                             {order.fillPrice
-                              ? formatCurrency(order.fillPrice)
+                              ? formatCurrency(order.fillPrice, "KRW", copy.app.dateLocale)
                               : order.limitPrice
-                                ? formatCurrency(order.limitPrice)
+                                ? formatCurrency(order.limitPrice, "KRW", copy.app.dateLocale)
                                 : ""}
                           </div>
                         </div>
@@ -1301,53 +3071,61 @@ export function MeetingRoom({ settingsHref = null }: { settingsHref?: string | n
                     </div>
                   </div>
                 ) : null}
-              <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>{(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => <p key={note} className="mb-2">{note}</p>)}<p>{copy.meeting.capabilitiesLine({ browserStt: browserSpeechSupported ? "\ube0c\ub77c\uc6b0\uc800" : "\uc5c6\uc74c", whisper: capabilities?.openaiStt ? "\uc900\ube44" : "\uaebc\uc9d0", browserTts: browserTtsSupported ? "\ube0c\ub77c\uc6b0\uc800" : "\uc5c6\uc74c", elevenLabs: capabilities?.elevenLabsTts ? "\uc900\ube44" : "\uaebc\uc9d0", openClawRemote: capabilities?.openclawRemote ? "\uc5f0\uacb0\ub428" : "\ub0b4\uc7a5 mock", openClawChat: capabilities?.openclawChat ? "\uc900\ube44" : "\uaebc\uc9d0" })}</p></div>
-              </div>
+              <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.feedNotes}</div>{(selectedSnapshot?.notes ?? [copy.meeting.noFeedNotes]).map((note) => <p key={note} className="mb-2">{note}</p>)}<p>{copy.meeting.capabilitiesLine({ browserStt: browserSpeechSupported ? "브라우저" : "없음", whisper: capabilities?.openaiStt ? "준비" : "꺼짐", browserTts: typeof window !== "undefined" && "speechSynthesis" in window ? "브라우저" : "없음", elevenLabs: capabilities?.elevenLabsTts ? "준비" : "꺼짐", openClawRemote: capabilities?.openclawRemote ? "연결됨" : "내장 mock", openClawChat: capabilities?.openclawChat ? "준비" : "꺼짐" })}</p></div>              </div>
             </ScrollArea>
           </Card>
 
-          <div className="flex min-h-0 flex-col gap-3">
-            <Card className="flex min-h-0 flex-1 flex-col p-4"><div className="mb-3 flex items-center justify-between gap-2"><div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.stageEyebrow}</div><div className="font-display text-2xl">{copy.meeting.stageTitle}</div></div><Badge variant="secondary">{copy.meeting.participants(AGENTS.length + 1)}</Badge></div><div className="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-3"><div className="noise-dots relative overflow-hidden rounded-[28px] border border-ink/10 bg-[#101927] text-white shadow-panel md:col-span-2 xl:col-span-1"><div className="absolute left-4 top-4 z-10 flex gap-2"><Badge>{copy.meeting.userLabel}</Badge><Badge variant="secondary">{copy.meeting.localCam}</Badge></div><video ref={videoRef} className="h-full w-full object-cover" playsInline muted />{!cameraReady ? <div className="absolute inset-0 grid place-items-center px-5 text-center text-sm text-white/70">{copy.meeting.cameraFallback}</div> : null}</div>{AGENTS.map((agent) => <AgentStageCard key={agent.id} agent={agent} status={agentStatus[agent.id]} latestMessage={latestMessages[agent.id]} />)}</div></Card>
-            <Card className="grid gap-3 p-4 lg:grid-cols-[1.1fr_0.9fr]"><div className="rounded-[24px] border border-ink/10 bg-[#101927] p-4 text-white shadow-panel"><div className="mb-2 text-xs uppercase tracking-[0.2em] text-white/55">{copy.meeting.openClawResearch}</div>{selectedTask?.screenshot || selectedArtifacts?.screenshot ? <div className="min-h-[220px] rounded-[20px] border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${selectedArtifacts?.screenshot || selectedTask?.screenshot})` }} /> : <div className="grid min-h-[220px] place-items-center rounded-[20px] border border-dashed border-white/15 text-sm text-white/60">{copy.meeting.noResearchTask}</div>}<div className="mt-3 flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.2em] text-white/55">{copy.meeting.openClawSummary}</div><div className="mt-1 text-sm text-white/80">{selectedTask?.summary || copy.meeting.openClawIdle}</div></div><Badge variant="secondary">{labelForBadge(selectedTask?.status || "standby")}</Badge></div>{selectedArtifacts?.notes?.length ? <div className="mt-3 space-y-2 text-sm text-white/70">{selectedArtifacts.notes.slice(0, 4).map((note) => <div key={note} className="rounded-[16px] border border-white/10 px-3 py-2">{note}</div>)}</div> : null}</div><div className="space-y-2"><div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.recentTasks}</div><ScrollArea className="max-h-[320px] space-y-2 pr-1">{taskHistory.map((task) => <button key={task.taskId} onClick={() => setSelectedTaskId(task.taskId)} className={cn("w-full rounded-[20px] border px-4 py-3 text-left transition", selectedTaskId === task.taskId ? "border-cobalt/30 bg-cobalt/5" : "border-ink/10 bg-white/75 hover:bg-white")}><div className="flex items-center justify-between gap-2"><div className="font-medium">{task.summary}</div><Badge variant="outline">{labelForBadge(task.status)}</Badge></div><div className="mt-1 text-xs text-mist">{formatTime(task.updatedAt)}</div></button>)}</ScrollArea></div></Card>
-            <Card className="p-4">
-              <form
-                className="flex flex-col gap-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void handleSend();
-                }}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" onClick={() => { if (sttMode === "browser") { isListening ? recognitionRef.current?.stop() : startBrowserSTT(); } else { void toggleWhisperRecording(); } }} disabled={sttMode === "browser" && !browserSpeechSupported || sttMode === "whisper" && !capabilities?.openaiStt || isSending}>{sttMode === "browser" ? isListening ? copy.meeting.stopMic : voiceAutoRun ? "말하고 바로 실행" : copy.meeting.browserMic : isRecording ? copy.meeting.stopWhisper : voiceAutoRun ? "Whisper 바로 실행" : copy.meeting.whisperRecord}</Button>
-                  <Button variant={voiceAutoRun ? "secondary" : "outline"} onClick={() => setVoiceAutoRun((previous) => !previous)}>{voiceAutoRun ? UX_COPY.voiceAutoRunLabelOn : UX_COPY.voiceAutoRunLabelOff}</Button>
-                  <Button variant="outline" onClick={() => { if (input.trim()) { void startOpenClawTask({ type: "openclaw_task", instruction: input.trim() }, "assistant"); } }} disabled={!input.trim() || isSending}>{copy.meeting.runOpenClaw}</Button>
-                </div>
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-end">
-                  <div className="min-w-0">
-                    <Textarea
-                      ref={composerRef}
-                      value={input}
-                      onChange={(event) => setInput(event.target.value)}
-                      onKeyDown={handleComposerKeyDown}
-                      placeholder={copy.meeting.placeholder}
-                      disabled={isSending}
-                      rows={3}
-                      autoFocus
-                      className="max-h-[220px] min-h-[120px] resize-none"
-                    />
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-mist">
-                      <span>{UX_COPY.enterHint}</span>
-                      <span>{voiceAutoRun ? UX_COPY.voiceAutoRunOn : UX_COPY.voiceAutoRunOff}</span>
-                    </div>
-                  </div>
-                  <Button type="submit" disabled={isSending || !input.trim()} className="h-12 lg:min-w-[160px]">{isSending ? copy.meeting.runningMeeting : copy.meeting.runMeeting}</Button>
-                  <Button variant="destructive" onClick={resetMeeting} className="h-12 lg:min-w-[120px]">{copy.meeting.reset}</Button>
-                </div>
-              </form>
-            </Card>
+          <div className="flex min-h-0 min-w-0 flex-col gap-3 self-start">
+            <ParticipantStagePanel
+              copy={copy}
+              locale={locale}
+              agents={agents}
+              agentStatus={agentStatus}
+              latestMessages={latestMessages}
+              cameraReady={cameraReady}
+              videoRef={videoRef}
+              activeTabLabel={activeTabLabel}
+              snapshotStatusLabel={selectedSnapshotStatusLabel}
+              snapshotDetail={selectedSnapshotDetail}
+              snapshotUpdatedAt={snapshotUpdatedAt}
+              timeline={timeline}
+              input={input}
+              isSending={isSending}
+              composerRef={composerRef}
+              onInputChange={setInput}
+              onComposerKeyDown={handleComposerKeyDown}
+              onSend={() => void handleSend()}
+              onReset={resetMeeting}
+            />
           </div>
 
-          <div className="flex min-h-0 flex-col gap-3"><Card className="flex min-h-0 flex-1 flex-col p-4"><div className="mb-3 flex items-center justify-between"><div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.timelineEyebrow}</div><div className="font-display text-2xl">{copy.meeting.timelineTitle}</div></div><Badge variant="secondary">{timeline.length}</Badge></div><ScrollArea className="min-h-0 flex-1 rounded-[24px] border border-ink/10 bg-white/70 p-3"><div className="space-y-3">{timeline.map((item) => <div key={item.id} className={cn("rounded-[22px] border p-3", item.speakerType === "user" && "border-ink/10 bg-ink text-white", item.speakerType === "agent" && "border-cobalt/10 bg-cobalt/5", item.speakerType === "system" && "border-ink/10 bg-white")}><div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em]"><span>{formatTime(item.ts)}</span><span>{item.speakerLabel}</span>{item.badge ? <Badge variant="outline">{labelForBadge(item.badge)}</Badge> : null}</div><div className="whitespace-pre-wrap text-sm leading-6">{item.text}</div></div>)}</div></ScrollArea></Card><Card className="flex min-h-0 flex-col p-4"><div className="mb-3 flex items-center justify-between gap-2"><div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.minutesEyebrow}</div><div className="font-display text-2xl">{copy.meeting.minutesTitle}</div></div><Button size="sm" variant="outline" onClick={handleDownloadMinutes} disabled={!minutes}>{copy.meeting.download}</Button></div><div className="rounded-[24px] border border-ink/10 bg-white/75 p-4 text-sm text-ink/90">{minutes ? <div className="space-y-3"><div><div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.minutesSummary}</div><div className="mt-1 leading-6">{minutes.summary}</div></div><div><div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.marketSnapshot}</div>{minutes.marketSnapshot.map((line) => <div key={line} className="mt-1">- {line}</div>)}</div><div><div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.actionItems}</div>{minutes.actionItems.map((line) => <div key={line} className="mt-1">- {line}</div>)}</div><div><div className="text-xs uppercase tracking-[0.2em] text-mist">{copy.meeting.tradeNotes}</div>{minutes.tradeNotes.map((line) => <div key={line} className="mt-1">- {line}</div>)}</div></div> : <div className="text-mist">{copy.meeting.timelineEmpty}</div>}</div><div className="mt-4"><div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{copy.meeting.savedLocally}</div><ScrollArea className="max-h-[180px] space-y-2 pr-1">{minutesHistory.map((record) => <button key={record.id} onClick={() => setMinutes(record.minutes)} className="w-full rounded-[18px] border border-ink/10 bg-white/75 px-3 py-2 text-left text-sm hover:bg-white"><div className="font-medium">{record.minutes.title}</div><div className="text-xs text-mist">{new Date(record.minutes.updatedAt).toLocaleString("ko-KR")}</div></button>)}</ScrollArea></div></Card></div>
+          <MeetingDebuggerDock
+            copy={copy}
+            locale={locale}
+            open={dockOpen}
+            activeTab={activeDockTab}
+            onToggle={() => setDockOpen((previous) => !previous)}
+            onTabChange={setActiveDockTab}
+            agents={agents}
+            timeline={timeline}
+            activeTabLabel={activeTabLabel}
+            latestSavedAt={latestSavedAt}
+            personas={personaOverrides}
+            selectedTask={selectedTask}
+            selectedArtifacts={selectedArtifacts}
+            taskHistory={taskHistory}
+            selectedTaskId={selectedTaskId}
+            completedTaskCount={completedTaskCount}
+            minutes={minutes}
+            minutesHistory={minutesHistory}
+            settingsHref={settingsHref}
+            onPersonaChange={updatePersona}
+            onPersonaReset={resetPersona}
+            onSelectTask={setSelectedTaskId}
+            onDownloadMinutes={handleDownloadMinutes}
+            onSelectMinutes={setMinutes}
+            onLocaleChange={handleLocaleChange}
+          />
         </div>
       </div>
     </div>

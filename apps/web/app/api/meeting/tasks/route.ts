@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveAppLocale, type AppLocale } from "@/lib/i18n/config";
 import { startMeetingTask } from "@/lib/openclaw/client";
 
 export const runtime = "nodejs";
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
       instruction?: string;
       url?: string;
       sessionId?: string;
+      locale?: AppLocale;
     };
 
     if (!body.agentId || !body.instruction) {
@@ -20,7 +22,8 @@ export async function POST(request: Request) {
       agentId: body.agentId,
       instruction: body.instruction,
       url: body.url,
-      sessionId: body.sessionId
+      sessionId: body.sessionId,
+      locale: resolveAppLocale(body.locale)
     });
 
     return NextResponse.json(task);

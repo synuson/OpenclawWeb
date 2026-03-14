@@ -1,26 +1,24 @@
-import { AGENTS_BY_ID } from "@/lib/meeting/agents";
-import { getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
+import { DEFAULT_LOCALE, getIntlLocale, type AppLocale } from "@/lib/i18n/config";
+import { getAgentsById } from "@/lib/meeting/agents";
+import { getActionItemFieldLabels, getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
 import {
   callOpenClawMeetingChat,
   type OpenClawMeetingChatResult
 } from "@/lib/openclaw/client";
-import type { ChatHistoryItem, MeetingAction, Provider, RoundPhase } from "@/lib/meeting/types";
+import type { AgentId, ChatHistoryItem, MeetingAction, Provider, RoundPhase } from "@/lib/meeting/types";
 
-const ANALYST_SECTIONS = getRoleDefinitionForAgent("analyst").outputFormat.sections;
-const FACILITATOR_SECTIONS = getRoleDefinitionForAgent("assistant").outputFormat.sections;
 const BROWSER_INTENT_REGEX =
-  /(browse|browser|openclaw|web|internet|search|look up|find|research|price target|filing|news|investigate|\ucc28\ud2b8|\ub274\uc2a4|\uac80\uc0c9|\ube0c\ub77c\uc6b0\uc800|\uc870\uc0ac)/i;
+  /(browse|browser|openclaw|web|internet|search|look up|find|research|latest|source|verify|price target|filing|news|investigate|chart|뉴스|검색|웹|브라우저|조사|최신|출처|검증|링크|기사|차트)/i;
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const DIRECT_PROVIDER_ORDER: Array<Exclude<Provider, "openclaw" | "mock">> = ["openai", "anthropic", "cerebras"];
-const APP_SNAPSHOT_LABEL = "\uc571 \uc2a4\ub0c5\uc0f7";
-const EMPTY_CONTENT_LINE = "- \ub0b4\uc6a9 \uc5c6\uc74c";
 
 export type CallLLMArgs = {
-  agentId: string;
+  agentId: AgentId;
   phase?: RoundPhase;
   agentSystemPrompt: string;
   message: string;
   history: ChatHistoryItem[];
+  locale?: AppLocale;
   requiredSections?: string[];
 };
 
@@ -97,19 +95,24 @@ export function isoNow() {
   return new Date().toISOString();
 }
 
-export function asAssistantLine(item: ChatHistoryItem) {
-  const agentName = item.agent ? AGENTS_BY_ID[item.agent]?.name : undefined;
+export function asAssistantLine(item: ChatHistoryItem, locale: AppLocale = DEFAULT_LOCALE) {
+  const agentsById = getAgentsById(locale);
+  const agentName = item.agent ? agentsById[item.agent]?.name : undefined;
   return agentName ? `${agentName}: ${item.content}` : item.content;
 }
 
-export async function getAgentContext(agentId: string) {
-  const currentTime = new Intl.DateTimeFormat("ko-KR", {
+export async function getAgentContext(agentId: AgentId, locale: AppLocale = DEFAULT_LOCALE) {
+  const currentTime = new Intl.DateTimeFormat(getIntlLocale(locale), {
     timeZone: "Asia/Seoul",
     dateStyle: "full",
     timeStyle: "medium"
   }).format(new Date());
+  const agentsById = getAgentsById(locale);
+  const agentName = agentsById[agentId]?.name ?? agentId;
 
-  return `Current time (Asia/Seoul): ${currentTime}\nResponding agent: ${AGENTS_BY_ID[agentId as keyof typeof AGENTS_BY_ID]?.name ?? agentId}`;
+  return locale === "ko"
+    ? `현재 시각(Asia/Seoul): ${currentTime}\n응답 에이전트: ${agentName}`
+    : `Current time (Asia/Seoul): ${currentTime}\nResponding agent: ${agentName}`;
 }
 
 export function detectBrowserActions(message: string): MeetingAction[] {
@@ -152,10 +155,11 @@ function stripMentions(input: string) {
   return input.replace(/@([^\s@]+)/g, "").replace(/\s+/g, " ");
 }
 
-function formatSections(sections: Array<[string, string[]]>) {
+function formatSections(sections: Array<[string, string[]]>, locale: AppLocale) {
+  const emptyLine = locale === "ko" ? "- 내용 없음" : "- No content";
   return sections
     .map(([title, lines]) => {
-      const body = lines.length > 0 ? lines.join("\n") : EMPTY_CONTENT_LINE;
+      const body = lines.length > 0 ? lines.join("\n") : emptyLine;
       return `## ${title}\n${body}`;
     })
     .join("\n\n");
@@ -182,18 +186,27 @@ function hasRequiredSections(text: string, requiredSections?: string[]) {
       .filter(Boolean)
   );
 
-  return requiredSections.every((section) => headings.has(section));
+  return requiredSections.every((section) => headings.has(normalizeHeading(section)));
 }
 
-function buildStructuredRetryMessage(message: string, requiredSections: string[]) {
-  return [
-    message,
-    "",
-    "Reply again using the exact section titles below in the same order.",
-    ...requiredSections.map((section) => `- ${section}`),
-    "",
-    "Keep the response in Korean Markdown and do not rename the headings."
-  ].join("\n");
+function buildStructuredRetryMessage(message: string, requiredSections: string[], locale: AppLocale) {
+  return locale === "ko"
+    ? [
+        message,
+        "",
+        "아래 섹션 제목을 정확히 같은 순서로 다시 사용해서 답하세요.",
+        ...requiredSections.map((section) => `- ${section}`),
+        "",
+        "한국어 Markdown 형식을 유지하고 제목 이름을 바꾸지 마세요."
+      ].join("\n")
+    : [
+        message,
+        "",
+        "Reply again using the exact section titles below in the same order.",
+        ...requiredSections.map((section) => `- ${section}`),
+        "",
+        "Keep the response in English Markdown and do not rename the headings."
+      ].join("\n");
 }
 
 async function callProviderWithValidation(provider: Provider, args: CallLLMArgs): Promise<CallLLMResult> {
@@ -206,9 +219,10 @@ async function callProviderWithValidation(provider: Provider, args: CallLLMArgs)
     throw new Error(`${provider} response did not satisfy the required meeting sections.`);
   }
 
+  const locale = args.locale ?? DEFAULT_LOCALE;
   const retry = await callSingleProvider(provider, {
     ...args,
-    message: buildStructuredRetryMessage(args.message, args.requiredSections)
+    message: buildStructuredRetryMessage(args.message, args.requiredSections, locale)
   });
 
   if (hasRequiredSections(retry.text, args.requiredSections)) {
@@ -232,6 +246,7 @@ async function callSingleProvider(provider: Provider, args: CallLLMArgs): Promis
       systemPrompt: args.agentSystemPrompt,
       message: args.message,
       history: args.history,
+      locale: args.locale,
       mode: "meeting"
     });
 
@@ -261,8 +276,20 @@ async function callSingleProvider(provider: Provider, args: CallLLMArgs): Promis
   };
 }
 
-function extractSourceLines(agentSystemPrompt: string) {
-  const sources = [APP_SNAPSHOT_LABEL];
+function getAnalystSections(locale: AppLocale) {
+  return getRoleDefinitionForAgent("analyst", locale).outputFormat.sections;
+}
+
+function getFacilitatorSections(locale: AppLocale) {
+  return getRoleDefinitionForAgent("assistant", locale).outputFormat.sections;
+}
+
+function getAppSnapshotLabel(locale: AppLocale) {
+  return locale === "ko" ? "앱 스냅샷" : "App snapshot";
+}
+
+function extractSourceLines(agentSystemPrompt: string, locale: AppLocale) {
+  const sources = [getAppSnapshotLabel(locale)];
   for (const candidate of ["Upbit", "Twelve Data", "Kiwoom", "OpenClaw Demo Trading", "Kiwoom REST"]) {
     if (agentSystemPrompt.includes(candidate) && !sources.includes(candidate)) {
       sources.push(candidate);
@@ -271,57 +298,159 @@ function extractSourceLines(agentSystemPrompt: string) {
   return sources.map((source) => `- ${source}`);
 }
 
-function buildAnalystMockReply(message: string, agentSystemPrompt: string) {
+function buildAnalystMockReply(message: string, agentSystemPrompt: string, locale: AppLocale) {
+  const [metricsSection, risksSection, sourcesSection, scenariosSection, recommendationSection] = getAnalystSections(locale);
   const lowerMessage = message.toLowerCase();
   const focus =
-    /btc|bitcoin|\ube44\ud2b8\ucf54\uc778/.test(lowerMessage)
-      ? "\ube44\ud2b8\ucf54\uc778 \uc218\uae09\uacfc \ubcc0\ub3d9\uc131"
-      : /kospi|kosdaq|samsung|005930|kr|\uad6d\ub0b4/.test(lowerMessage)
-        ? "\uad6d\ub0b4 \uc99d\uc2dc \uc218\uae09\uacfc \ub300\ud615\uc8fc \ud750\ub984"
-        : /nasdaq|s&p|qqq|aapl|nvda|us|\ubbf8\uad6d/.test(lowerMessage)
-          ? "\ubbf8\uad6d \uc9c0\uc218\uc640 AI \ub300\ud615\uc8fc \uc21c\ud658"
-          : "\uc2dc\uc7a5 \uc804\ubc18\uacfc \ud3ec\uc9c0\uc158 \ub9ac\uc2a4\ud06c";
+    /btc|bitcoin|비트코인/.test(lowerMessage)
+      ? locale === "ko"
+        ? "비트코인 수급과 변동성"
+        : "Bitcoin flow and volatility"
+      : /kospi|kosdaq|samsung|005930|kr|국내/.test(lowerMessage)
+        ? locale === "ko"
+          ? "국내 증시 수급과 대형주 흐름"
+          : "Korean equity flow and large-cap leadership"
+        : /nasdaq|s&p|qqq|aapl|nvda|us|미국/.test(lowerMessage)
+          ? locale === "ko"
+            ? "미국 지수와 AI 대형주 순환"
+            : "US index momentum and AI large-cap rotation"
+          : locale === "ko"
+            ? "자산군 전반의 리스크와 포지셔닝"
+            : "Cross-asset risk and positioning";
 
-  return formatSections([
-    [ANALYST_SECTIONS[0], [`- \ud604\uc7ac \ud575\uc2ec \ud655\uc778 \ub300\uc0c1\uc740 ${focus}\uc785\ub2c8\ub2e4.`, `- \uc9c1\uc804 \ud750\ub984\uc740 \uc720\uc9c0\ub418\uace0 \uc788\uc9c0\ub9cc \ucd94\uaca9 \uc9c4\uc785 \uc5ec\ubd80\ub294 \uac70\ub798\ub300\uae08\uacfc \uc9c0\uc9c0 \uad6c\uac04\uc744 \ud568\uaed8 \ubd10\uc57c \ud569\ub2c8\ub2e4.`]],
-    [ANALYST_SECTIONS[1], [`- \ub9ac\uc2a4\ud06c: \ub2e8\uae30 \uacfc\uc5f4 \ud6c4 \ubcc0\ub3d9\uc131 \ud655\ub300 | \uc601\ud5a5\ub3c4: high | \ubc1c\uc0dd\ud655\ub960: medium | \uadfc\uac70: \uac00\uaca9 \ubc18\uc751\uc774 \ube60\ub974\uace0 \ucd94\uaca9 \ub9e4\uc218 \uc720\uc785 \uac00\ub2a5\uc131\uc774 \ud07d\ub2c8\ub2e4. | \ub300\uc751: \ucd94\uaca9 \ube44\uc911\uc744 \uc904\uc774\uace0 \uc190\uc808 \uae30\uc900\uc744 \uba3c\uc800 \uc815\ud569\ub2c8\ub2e4.`]],
-    [ANALYST_SECTIONS[2], extractSourceLines(agentSystemPrompt)],
-    [ANALYST_SECTIONS[3], ["- \ubca0\uc774\uc2a4: \ud604\uc7ac \ucd94\uc138\ub294 \uc720\uc9c0\ub418\uc9c0\ub9cc \ud655\uc778 \uc804\uae4c\uc9c0\ub294 \ubcf4\uc218\uc801\uc73c\ub85c \uc811\uadfc\ud569\ub2c8\ub2e4.", "- \ube44\uad00: \uc9c0\uc9c0\uc120 \uc774\ud0c8\uacfc \ub274\uc2a4 \uc545\ud654\uac00 \uacb9\uce58\uba74 \ub2e8\uae30 \ubc29\uc5b4 \uc804\ud658\uc774 \ud544\uc694\ud569\ub2c8\ub2e4."]],
-    [ANALYST_SECTIONS[4], ["- \uc2e0\uaddc \uc9c4\uc785\uc740 \ubd84\ud560 \uae30\uc900\uc73c\ub85c \uc2dc\uc791\ud558\uace0, \ub2e4\uc74c \ud655\uc778 \uc2dc\uc810\uae4c\uc9c0 \uc190\uc2e4 \ud55c\ub3c4\ub97c \uba3c\uc800 \uc815\ud558\ub294 \uc811\uadfc\uc774 \uc801\uc808\ud569\ub2c8\ub2e4."]]
-  ]);
+  return formatSections(
+    [
+      [
+        metricsSection,
+        locale === "ko"
+          ? [
+              `- 현재 핵심 포인트: ${focus}`,
+              "- 스냅샷 기준으로 추세는 유지되지만 단기 과열 여부를 재확인할 필요가 있습니다.",
+              "- 의사결정 임계값은 직전 고점과 저점 이탈 여부, 거래대금 유지 여부입니다."
+            ]
+          : [
+              `- Current focus: ${focus}`,
+              "- The snapshot still supports the trend, but short-term overheating needs a recheck.",
+              "- The decision threshold is whether price breaks the last swing levels and whether turnover holds up."
+            ]
+      ],
+      [
+        risksSection,
+        locale === "ko"
+          ? [
+              "- 리스크: 변동성 재확대 | 영향도: high | 발생확률: medium | 근거: 단기 가격 반응이 빠르고 추격 매수 유입 가능성이 큼 | 대응: 포지션 크기 축소 후 재확인",
+              "- 리스크: 뉴스 공백 구간 오판 | 영향도: medium | 발생확률: medium | 근거: 가격 신호만으로 판단 시 해석 오류 가능 | 대응: 뉴스와 수급을 함께 확인"
+            ]
+          : [
+              "- Risk: volatility expansion | Impact: high | Probability: medium | Evidence: short-term price reactions are fast and chase flows can build quickly | Mitigation: cut size and re-validate",
+              "- Risk: misreading a news vacuum | Impact: medium | Probability: medium | Evidence: price-only interpretation can be misleading | Mitigation: validate with news and flow together"
+            ]
+      ],
+      [sourcesSection, extractSourceLines(agentSystemPrompt, locale)],
+      [
+        scenariosSection,
+        locale === "ko"
+          ? [
+              "- 베이스: 현재 추세 유지, 다만 눌림 확인 전까지 추격은 제한",
+              "- 낙관: 거래대금과 모멘텀이 동반 유지되면 추가 상승 여지 확대",
+              "- 비관: 지지선 이탈과 뉴스 악화가 겹치면 단기 방어 전환 필요"
+            ]
+          : [
+              "- Base: the current trend holds, but chasing stays limited until a pullback confirms",
+              "- Bull: upside expands if turnover and momentum stay aligned",
+              "- Bear: if support breaks while news deteriorates, shift to defense quickly"
+            ]
+      ],
+      [
+        recommendationSection,
+        locale === "ko"
+          ? ["- 신규 판단은 소규모로 시작하고, 다음 확인 시점까지 리스크 한도를 먼저 정하세요."]
+          : ["- Start any new exposure small and define the risk limit before the next checkpoint."]
+      ]
+    ],
+    locale
+  );
 }
 
-function buildFacilitatorMockReply(message: string, agentSystemPrompt: string) {
+function buildFacilitatorMockReply(message: string, agentSystemPrompt: string, locale: AppLocale) {
+  const [conclusionSection, evidenceSection, actionsSection, unresolvedSection, minutesSection] = getFacilitatorSections(locale);
+  const labels = getActionItemFieldLabels(locale);
+  const agentsById = getAgentsById(locale);
   const lowerMessage = message.toLowerCase();
-  const hasOrderIntent = /(buy|sell|order|\ub9e4\uc218|\ub9e4\ub3c4|\uc8fc\ubb38)/.test(lowerMessage);
+  const hasOrderIntent = /(buy|sell|order|매수|매도|주문)/.test(lowerMessage);
   const hasResearchIntent = BROWSER_INTENT_REGEX.test(lowerMessage);
   const actionTask = hasOrderIntent
-    ? "\ubaa8\uc758\ud22c\uc790 \ud654\uba74\uc5d0\uc11c \uc8fc\ubb38 \uac00\uc815\uacfc \ub9ac\uc2a4\ud06c \ud55c\ub3c4\ub97c \uac80\uc99d\ud55c\ub2e4"
+    ? locale === "ko"
+      ? "모의투자 패널에서 주문 가정을 검증한다"
+      : "Validate the order thesis in the paper-trading panel"
     : hasResearchIntent
-      ? "OpenClaw \uc870\uc0ac \ubc94\uc704\ub97c \ud655\uc815\ud558\uace0 \ud544\uc694\ud55c URL\uc744 \uc815\ub9ac\ud55c\ub2e4"
-      : "\ub2e4\uc74c \ud655\uc778 \uc2dc\uc810\uacfc \ud310\ub2e8 \uae30\uc900\uc744 \ud655\uc815\ud55c\ub2e4";
-  const actionOwner = hasOrderIntent ? "\uc774\uc548" : "\uc11c\uc724";
+      ? locale === "ko"
+        ? "OpenClaw 후속 조사 범위를 확정한다"
+        : "Define the scope for the OpenClaw follow-up"
+      : locale === "ko"
+        ? "다음 확인 시점과 판단 기준을 확정한다"
+        : "Lock the next checkpoint and decision criteria";
+  const actionOwner = hasOrderIntent ? agentsById.analyst.name : agentsById.assistant.name;
   const sourceLine = agentSystemPrompt.includes("OpenClaw")
-    ? "- \ucd94\uac00 \uc870\uc0ac\uac00 \ud544\uc694\ud558\uba74 OpenClaw \uacb0\uacfc\ub97c \uadfc\uac70\uc5d0 \ud569\uce69\ub2c8\ub2e4."
-    : "- \ud604\uc7ac \uc2a4\ub0c5\uc0f7 \uae30\uc900\uc73c\ub85c\ub3c4 \uacb0\ub860\uc744 \ub0bc \uc218 \uc788\uc2b5\ub2c8\ub2e4.";
+    ? locale === "ko"
+      ? "- 추가 조사가 필요하면 OpenClaw 결과를 근거에 합칩니다."
+      : "- If more research is needed, fold the OpenClaw findings into the evidence."
+    : locale === "ko"
+      ? "- 현재 스냅샷만으로도 결론을 낼 수 있습니다."
+      : "- The current snapshot is enough to reach a working conclusion.";
 
-  return formatSections([
-    [FACILITATOR_SECTIONS[0], ["- \ud604\uc7ac \uc815\ubcf4\ub9cc\uc73c\ub85c\ub3c4 \ub2e4\uc74c \uc561\uc158\uc740 \uc815\ud560 \uc218 \uc788\uc9c0\ub9cc, \uc2e4\ud589 \uc804 \ub9c8\uc9c0\ub9c9 \ud655\uc778 \ud56d\ubaa9\uc740 \ub0a8\uaca8\ub450\ub294 \uac83\uc774 \uc548\uc804\ud569\ub2c8\ub2e4."]],
-    [FACILITATOR_SECTIONS[1], ["- \ubd84\uc11d\uac00 \uad00\uc810\uc5d0\uc11c\ub294 \ucd94\uc138\ub294 \uc720\ud6a8\ud558\uc9c0\ub9cc \ub9ac\uc2a4\ud06c \uad00\ub9ac\uac00 \ubc18\ub4dc\uc2dc \uc120\ud589\ub418\uc5b4\uc57c \ud569\ub2c8\ub2e4.", sourceLine]],
-    [FACILITATOR_SECTIONS[2], [`- \uc791\uc5c5: ${actionTask} | \ub2f4\ub2f9: ${actionOwner} | \uae30\ud55c: TBD | \uc0c1\ud0dc: todo`]],
-    [FACILITATOR_SECTIONS[3], ["- \ud575\uc2ec \uc9c0\uc9c0 \uad6c\uac04\uacfc \ub274\uc2a4 \uc774\ubca4\ud2b8\ub97c \uc5b4\ub290 \ubc94\uc704\uae4c\uc9c0 \ucd94\uac00 \uac80\uc99d\ud560\uc9c0 \uc544\uc9c1 \ud655\uc815\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4."]],
-    [FACILITATOR_SECTIONS[4], ["- \uc774\ubc88 \ub77c\uc6b4\ub4dc\ub294 \ucd94\uc138\uc640 \ub9ac\uc2a4\ud06c\ub97c \ud655\uc778\ud588\uace0, \uc2e4\ud589 \uc804 \uac80\uc99d \ud56d\ubaa9\uc744 \ub0a8\uae30\ub294 \ucabd\uc73c\ub85c \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4."]]
-  ]);
+  return formatSections(
+    [
+      [
+        conclusionSection,
+        locale === "ko"
+          ? ["- 현재 정보만으로도 다음 액션을 정할 수 있지만, 실행 전 마지막 확인 절차는 유지해야 합니다."]
+          : ["- The current information is enough to define the next action, but the final pre-execution check still needs to stay in place."]
+      ],
+      [
+        evidenceSection,
+        locale === "ko"
+          ? [
+              "- 분석가 관점에서는 추세 활용 여지는 있으나 리스크 관리가 선행되어야 합니다.",
+              sourceLine
+            ]
+          : [
+              "- From the analyst view, the trend is usable, but risk management has to come first.",
+              sourceLine
+            ]
+      ],
+      [
+        actionsSection,
+        [
+          `- ${labels.task}: ${actionTask} | ${labels.owner}: ${actionOwner} | ${labels.dueAt}: ${labels.tbd} | ${labels.status}: todo`
+        ]
+      ],
+      [
+        unresolvedSection,
+        locale === "ko"
+          ? ["- 외부 뉴스와 실시간 호가를 어디까지 추가 검증할지 아직 확정되지 않았습니다."]
+          : ["- The scope of additional validation for external news and live quotes is still open."]
+      ],
+      [
+        minutesSection,
+        locale === "ko"
+          ? ["- 이번 라운드는 추세 활용 가능성을 확인했고, 실행 전 검증 절차를 남기는 것으로 정리합니다."]
+          : ["- This round confirmed that the trend may be tradable, while preserving a final validation step before execution."]
+      ]
+    ],
+    locale
+  );
 }
 
 function callMock(args: CallLLMArgs) {
-  const isAnalyst = args.agentSystemPrompt.includes("[ROLE:analyst]");
-  return isAnalyst
-    ? buildAnalystMockReply(args.message, args.agentSystemPrompt)
-    : buildFacilitatorMockReply(args.message, args.agentSystemPrompt);
+  const locale = args.locale ?? DEFAULT_LOCALE;
+  return args.agentId === "analyst"
+    ? buildAnalystMockReply(args.message, args.agentSystemPrompt, locale)
+    : buildFacilitatorMockReply(args.message, args.agentSystemPrompt, locale);
 }
 
 async function callCerebras(args: CallLLMArgs) {
+  const locale = args.locale ?? DEFAULT_LOCALE;
   const apiKey = process.env.CEREBRAS_API_KEY;
   if (!apiKey) {
     throw new Error("CEREBRAS_API_KEY is not set.");
@@ -333,7 +462,7 @@ async function callCerebras(args: CallLLMArgs) {
     ...args.history.map((item) =>
       item.role === "user"
         ? { role: "user", content: item.content }
-        : { role: "assistant", content: asAssistantLine(item) }
+        : { role: "assistant", content: asAssistantLine(item, locale) }
     ),
     { role: "user", content: args.message }
   ];
@@ -365,6 +494,7 @@ async function callCerebras(args: CallLLMArgs) {
 }
 
 async function callAnthropic(args: CallLLMArgs) {
+  const locale = args.locale ?? DEFAULT_LOCALE;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set.");
@@ -375,7 +505,7 @@ async function callAnthropic(args: CallLLMArgs) {
     ...args.history.map((item) =>
       item.role === "user"
         ? { role: "user", content: item.content }
-        : { role: "assistant", content: asAssistantLine(item) }
+        : { role: "assistant", content: asAssistantLine(item, locale) }
     ),
     { role: "user", content: args.message }
   ];
@@ -438,6 +568,7 @@ function extractOpenAIOutputText(data: unknown) {
 }
 
 async function callOpenAI(args: CallLLMArgs) {
+  const locale = args.locale ?? DEFAULT_LOCALE;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set.");
@@ -449,7 +580,7 @@ async function callOpenAI(args: CallLLMArgs) {
     ...args.history.map((item) =>
       item.role === "user"
         ? { role: "user", content: item.content }
-        : { role: "assistant", content: asAssistantLine(item) }
+        : { role: "assistant", content: asAssistantLine(item, locale) }
     ),
     { role: "user", content: args.message }
   ];
