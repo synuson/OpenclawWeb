@@ -196,6 +196,8 @@ export type MeetingSessionRecord = {
   userMessage: string;
 };
 
+export type MeetingResponseMode = "auto" | "assistant" | "analyst" | "both";
+
 export type MeetingRoundRequest = {
   message: string;
   history: ChatHistoryItem[];
@@ -205,6 +207,7 @@ export type MeetingRoundRequest = {
   minutes?: MeetingMinutes | null;
   locale?: AppLocale;
   personaOverrides?: AgentPersonaOverrides;
+  responseMode?: MeetingResponseMode;
 };
 
 export type MeetingRoundStopReason =

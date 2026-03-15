@@ -22,7 +22,8 @@ export async function POST(request: Request) {
         portfolioSnapshot: body.portfolioSnapshot ?? null,
         minutes: body.minutes ?? null,
         locale: resolveAppLocale(body.locale),
-        personaOverrides: body.personaOverrides
+        personaOverrides: body.personaOverrides,
+        responseMode: body.responseMode
       })
     );
   } catch (error) {

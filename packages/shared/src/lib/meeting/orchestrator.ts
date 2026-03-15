@@ -13,6 +13,7 @@ import type {
   MeetingAction,
   MeetingMinutes,
   MeetingRoundResearch,
+  MeetingResponseMode,
   MeetingRoundRequest,
   MeetingRoundResponse,
   MeetingTurn,
@@ -363,6 +364,23 @@ function chooseFirstSpeaker(message: string, mentionedAgentId?: AgentId): AgentI
   return "assistant";
 }
 
+function resolveRequestedAgents(message: string, responseMode: MeetingResponseMode | undefined, mentionedAgentId?: AgentId) {
+  if (responseMode === "assistant") {
+    return ["assistant"] as AgentId[];
+  }
+
+  if (responseMode === "analyst") {
+    return ["analyst"] as AgentId[];
+  }
+
+  const firstSpeakerId = chooseFirstSpeaker(message, mentionedAgentId);
+  if (responseMode === "both") {
+    return [firstSpeakerId, otherAgent(firstSpeakerId)] as AgentId[];
+  }
+
+  return [firstSpeakerId] as AgentId[];
+}
+
 function compactDisplayLine(line: string) {
   const normalized = line
     .replace(HEADING_PATTERN, "")
@@ -484,8 +502,12 @@ function chooseResearchAgent(
   message: string,
   firstSpeakerId: AgentId,
   draftTurns: DraftTurn[],
+  requestedAgents: AgentId[],
   mentionedAgentId?: AgentId
 ): AgentId {
+  if (requestedAgents.length === 1) {
+    return requestedAgents[0];
+  }
   if (mentionedAgentId) {
     return mentionedAgentId;
   }
@@ -650,8 +672,9 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
   let activeProvider = preferredProvider;
   const sessionId = request.minutes?.sessionId || uid("session");
   const mentionedAgentId = detectMentionedAgentId(request.message, locale, request.personaOverrides);
-  const firstSpeakerId = chooseFirstSpeaker(request.message, mentionedAgentId);
-  const supportSpeakerId = otherAgent(firstSpeakerId);
+  const requestedAgents = resolveRequestedAgents(request.message, request.responseMode, mentionedAgentId);
+  const firstSpeakerId = requestedAgents[0] ?? chooseFirstSpeaker(request.message, mentionedAgentId);
+  const supportSpeakerId = requestedAgents[1];
   const sharedContext = buildSharedContext(request, locale, agentsById);
 
   const draftTurns: DraftTurn[] = [];
@@ -682,7 +705,7 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
     provider: firstResult.provider
   });
 
-  if (!mentionedAgentId) {
+  if (supportSpeakerId) {
     const supportHistory = appendHistory(request.history, draftTurns[0]);
     const supportPhase = getTurnPhase(supportSpeakerId);
     const supportSections = getRoleDefinitionForAgent(supportSpeakerId, locale).outputFormat.sections;
@@ -720,7 +743,7 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
   let stopReason: MeetingRoundResponse["meta"]["stopReason"] = "conversation_complete";
 
   if (actions[0]) {
-    const researchAgentId = chooseResearchAgent(request.message, firstSpeakerId, draftTurns, mentionedAgentId);
+    const researchAgentId = chooseResearchAgent(request.message, firstSpeakerId, draftTurns, requestedAgents, mentionedAgentId);
     research = await runMeetingResearchTask({
       agentId: researchAgentId,
       instruction: actions[0].instruction,

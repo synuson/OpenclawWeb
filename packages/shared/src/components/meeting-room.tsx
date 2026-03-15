@@ -20,6 +20,7 @@ import type {
   OpenClawConnectionProbe,
   MeetingMinutes,
   MeetingRoundResponse,
+  MeetingResponseMode,
   MeetingSessionRecord,
   MeetingTask,
   MeetingTaskArtifacts,
@@ -90,6 +91,7 @@ const SMALL_SELECT_CLASS_NAME =
   "h-9 rounded-full border border-ink/10 bg-white px-3 text-xs text-ink shadow-[0_10px_20px_rgba(18,24,36,0.05)] outline-none transition focus:border-cobalt/35 focus:ring-4 focus:ring-cobalt/10";
 type MetricTone = "default" | "cobalt" | "mint" | "ember";
 type MeetingCopy = ReturnType<typeof getDictionary>;
+type ResponseModeOption = { value: MeetingResponseMode; label: string };
 
 const PERSONA_AVATAR_THEMES: Record<
   AgentAvatarVariant,
@@ -155,6 +157,32 @@ const PERSONA_AVATAR_PRESETS: Record<
     label: { ko: "\uADF8\uB9AC\uB4DC", en: "Grid" }
   }
 };
+function getResponseModeOptions(locale: AppLocale, assistantLabel: string, analystLabel: string): ResponseModeOption[] {
+  return [
+    { value: "auto", label: locale === "ko" ? "자동" : "Auto" },
+    { value: "analyst", label: locale === "ko" ? `${analystLabel}만` : `${analystLabel} only` },
+    { value: "assistant", label: locale === "ko" ? `${assistantLabel}만` : `${assistantLabel} only` },
+    { value: "both", label: locale === "ko" ? "둘 다" : "Both" }
+  ];
+}
+
+function getResponseModeCaption(mode: MeetingResponseMode, options: ResponseModeOption[], locale: AppLocale) {
+  const label = options.find((option) => option.value === mode)?.label ?? options[0]?.label ?? "";
+  return locale === "ko" ? `답변 대상: ${label}` : `Reply target: ${label}`;
+}
+
+function getPendingAgentStatus(mode: MeetingResponseMode): Record<AgentId, AgentStatus> {
+  if (mode === "assistant") {
+    return { assistant: "thinking", analyst: "idle" };
+  }
+
+  if (mode === "analyst") {
+    return { assistant: "idle", analyst: "thinking" };
+  }
+
+  return { assistant: "thinking", analyst: "thinking" };
+}
+
 const MARKET_SESSION_LABELS: Record<AppLocale, Record<Exclude<MarketSessionState, "always">, string>> = {
   ko: {
     open: "\uac1c\uc7a5",
@@ -1015,15 +1043,17 @@ function MeetingScriptConsolePanel({
   input,
   isSending,
   sttMode,
-  voiceAutoRun,
   isListening,
   isRecording,
   browserSpeechSupported,
   openAiSttSupported,
+  responseMode,
+  responseModeOptions,
   composerRef,
   onInputChange,
   onComposerKeyDown,
   onMicAction,
+  onResponseModeChange,
   onSend,
   onReset
 }: {
@@ -1033,20 +1063,23 @@ function MeetingScriptConsolePanel({
   input: string;
   isSending: boolean;
   sttMode: SpeechMode;
-  voiceAutoRun: boolean;
   isListening: boolean;
   isRecording: boolean;
   browserSpeechSupported: boolean;
   openAiSttSupported: boolean;
+  responseMode: MeetingResponseMode;
+  responseModeOptions: ResponseModeOption[];
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicAction: () => void;
+  onResponseModeChange: (mode: MeetingResponseMode) => void;
   onSend: () => void;
   onReset: () => void;
 }) {  const panelCopy = dockPanelCopy(locale);
   const timelineItems = timeline ?? [];
   const scriptEntries = timelineItems.filter((item) => item.kind === "message").slice(-10);
+  const activeResponseModeLabel = getResponseModeCaption(responseMode, responseModeOptions, locale);
 
   return (
     <div className="flex min-h-0 flex-col rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_24px_56px_rgba(18,24,36,0.08)]">
@@ -1117,20 +1150,29 @@ function MeetingScriptConsolePanel({
                 {sttMode === "browser"
                   ? isListening
                     ? copy.meeting.stopMic
-                    : voiceAutoRun
-                      ? copy.meeting.speakAndRun
-                      : copy.meeting.browserMic
+                    : copy.meeting.speakAndRun
                   : isRecording
                     ? copy.meeting.stopWhisper
-                    : voiceAutoRun
-                      ? copy.meeting.whisperAndRun
-                      : copy.meeting.whisperRecord}
+                    : copy.meeting.whisperAndRun}
               </Button>
               <Badge variant="outline">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
+              <select
+                value={responseMode}
+                onChange={(event) => onResponseModeChange(event.target.value as MeetingResponseMode)}
+                disabled={isSending}
+                className={SMALL_SELECT_CLASS_NAME}
+              >
+                {responseModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="text-right text-xs text-mist">
-              <div>{copy.meeting.browserMicHint}</div>
-              <div className="mt-1">{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</div>
+              <div>{activeResponseModeLabel}</div>
+              <div className="mt-1">{copy.meeting.browserMicHint}</div>
+
             </div>
           </div>
           <Textarea
@@ -1221,15 +1263,17 @@ function ParticipantStagePanel({
   input,
   isSending,
   sttMode,
-  voiceAutoRun,
   isListening,
   isRecording,
   browserSpeechSupported,
   openAiSttSupported,
+  responseMode,
+  responseModeOptions,
   composerRef,
   onInputChange,
   onComposerKeyDown,
   onMicAction,
+  onResponseModeChange,
   onSend,
   onReset
 }: {
@@ -1248,15 +1292,17 @@ function ParticipantStagePanel({
   input: string;
   isSending: boolean;
   sttMode: SpeechMode;
-  voiceAutoRun: boolean;
   isListening: boolean;
   isRecording: boolean;
   browserSpeechSupported: boolean;
   openAiSttSupported: boolean;
+  responseMode: MeetingResponseMode;
+  responseModeOptions: ResponseModeOption[];
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicAction: () => void;
+  onResponseModeChange: (mode: MeetingResponseMode) => void;
   onSend: () => void;
   onReset: () => void;
 }) {  return (
@@ -1293,15 +1339,17 @@ function ParticipantStagePanel({
             input={input}
             isSending={isSending}
             sttMode={sttMode}
-            voiceAutoRun={voiceAutoRun}
             isListening={isListening}
             isRecording={isRecording}
             browserSpeechSupported={browserSpeechSupported}
             openAiSttSupported={openAiSttSupported}
+            responseMode={responseMode}
+            responseModeOptions={responseModeOptions}
             composerRef={composerRef}
             onInputChange={onInputChange}
             onComposerKeyDown={onComposerKeyDown}
             onMicAction={onMicAction}
+            onResponseModeChange={onResponseModeChange}
             onSend={onSend}
             onReset={onReset}
           />
@@ -1426,16 +1474,16 @@ function MeetingComposerPanel({
   input,
   isSending,
   sttMode,
-  voiceAutoRun,
   isListening,
   isRecording,
   browserSpeechSupported,
   openAiSttSupported,
+  responseMode,
+  responseModeOptions,
   composerRef,
   onInputChange,
   onComposerKeyDown,
   onMicAction,
-  onToggleVoiceAutoRun,
   onRunOpenClaw,
   onSend,
   onReset
@@ -1444,16 +1492,17 @@ function MeetingComposerPanel({
   input: string;
   isSending: boolean;
   sttMode: SpeechMode;
-  voiceAutoRun: boolean;
   isListening: boolean;
   isRecording: boolean;
   browserSpeechSupported: boolean;
   openAiSttSupported: boolean;
+  responseMode: MeetingResponseMode;
+  responseModeOptions: ResponseModeOption[];
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicAction: () => void;
-  onToggleVoiceAutoRun: () => void;
+  onResponseModeChange: (mode: MeetingResponseMode) => void;
   onRunOpenClaw: () => void;
   onSend: () => void;
   onReset: () => void;
@@ -1477,25 +1526,17 @@ function MeetingComposerPanel({
               {sttMode === "browser"
                 ? isListening
                   ? copy.meeting.stopMic
-                  : voiceAutoRun
-                    ? copy.meeting.speakAndRun
-                    : copy.meeting.browserMic
+                  : copy.meeting.speakAndRun
                 : isRecording
                   ? copy.meeting.stopWhisper
-                  : voiceAutoRun
-                    ? copy.meeting.whisperAndRun
-                    : copy.meeting.whisperRecord}
+                  : copy.meeting.whisperAndRun}
             </Button>
-            <Button variant={voiceAutoRun ? "secondary" : "outline"} onClick={onToggleVoiceAutoRun}>
-              {voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}
-            </Button>
-            <Button variant="outline" onClick={onRunOpenClaw} disabled={!input.trim() || isSending}>
+                        <Button variant="outline" onClick={onRunOpenClaw} disabled={!input.trim() || isSending}>
               {copy.meeting.runOpenClaw}
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-mist">
             <Badge variant="secondary">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
-            <Badge variant="outline">{voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}</Badge>
           </div>
         </div>
         <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_160px_124px] 2xl:items-stretch">
@@ -1513,7 +1554,7 @@ function MeetingComposerPanel({
             />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-mist">
               <span>{copy.meeting.enterHint}</span>
-              <span>{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</span>
+              <span>{copy.meeting.voiceAutoRunOn}</span>
             </div>
           </div>
           <Button type="submit" disabled={isSending || !input.trim()} className="h-14 rounded-[24px] 2xl:h-auto 2xl:min-h-[120px] 2xl:rounded-[28px] 2xl:flex-col 2xl:px-6">
@@ -2299,7 +2340,7 @@ export function MeetingRoom({
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
   const [autoSpeakMode, setAutoSpeakMode] = useState<AutoSpeakMode>("off");
-  const [voiceAutoRun, setVoiceAutoRun] = useState(false);
+  const [responseMode, setResponseMode] = useState<MeetingResponseMode>("auto");
   const [isListening, setIsListening] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -2347,6 +2388,10 @@ export function MeetingRoom({
 
   const agents = useMemo(() => getAgents(locale, personaOverrides), [locale, personaOverrides]);
   const agentsById = useMemo(() => getAgentsById(locale, personaOverrides), [locale, personaOverrides]);
+  const responseModeOptions = useMemo(
+    () => getResponseModeOptions(locale, agentsById.assistant.name, agentsById.analyst.name),
+    [agentsById.assistant.name, agentsById.analyst.name, locale]
+  );
 
   const selectedSnapshot = useMemo(() => {
     if (activeTab === "btc") return btcSnapshot;
@@ -2398,25 +2443,29 @@ export function MeetingRoom({
     capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw \uD68C\uC758" : "OpenClaw Meeting") : null
   ].filter(Boolean) as string[];
   useEffect(() => {
+    const recognitionSource = (window as Window & {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    }).SpeechRecognition ||
+      (window as Window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).webkitSpeechRecognition;
+
+    setBrowserSpeechSupported(Boolean(recognitionSource));
+    setBrowserTtsSupported("speechSynthesis" in window);
+
     try {
       const stored = window.localStorage.getItem(MINUTES_STORAGE_KEY);
       if (stored) {
         setMinutesHistory(JSON.parse(stored) as MeetingSessionRecord[]);
+      } else {
+        setMinutesHistory([]);
       }
-      setPersonaOverrides(readStoredPersonas(locale));
-      const recognitionSource = (window as Window & {
-        SpeechRecognition?: new () => BrowserSpeechRecognition;
-        webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
-      }).SpeechRecognition ||
-      (window as Window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition }).webkitSpeechRecognition;
-      setBrowserSpeechSupported(Boolean(recognitionSource));
-      setBrowserTtsSupported("speechSynthesis" in window);
     } catch {
+      window.localStorage.removeItem(MINUTES_STORAGE_KEY);
       setMinutesHistory([]);
-      setPersonaOverrides(buildPersonaState(locale));
-    } finally {
-      personaHydratedRef.current = true;
     }
+
+    setPersonaOverrides(readStoredPersonas(locale));
+    personaHydratedRef.current = true;
   }, [locale]);
 
   useEffect(() => {
@@ -2796,7 +2845,7 @@ export function MeetingRoom({
       return;
     }
 
-    if (!voiceAutoRun || isSending) {
+    if (isSending) {
       setInput(normalized);
       setNotice(source === "browser" ? copy.meeting.notices.transcriptInserted : copy.meeting.notices.whisperInserted);
       return;
@@ -2940,7 +2989,7 @@ export function MeetingRoom({
     cancelSpeech();
     setIsSending(true);
     setInput("");
-    setAgentStatus({ assistant: "thinking", analyst: "thinking" });
+    setAgentStatus(getPendingAgentStatus(responseMode));
     const baseTimeline = [...timeline];
     const userItem = createTimelineItem({ ts: new Date().toISOString(), kind: "message", speakerType: "user", speakerLabel: copy.meeting.userLabel, badge: activeTab, text: message });
     setTimeline((previous) => [...previous, userItem]);
@@ -2957,7 +3006,8 @@ export function MeetingRoom({
           portfolioSnapshot: portfolio,
           minutes: minutes ? { ...minutes, sessionId } : null,
           locale,
-          personaOverrides
+          personaOverrides,
+          responseMode
         })
       });
       if (data.research) {
@@ -3319,20 +3369,9 @@ export function MeetingRoom({
                   </div>
                 ) : null}
                             <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
-                    <div className="text-xs text-mist">{voiceAutoRun ? copy.meeting.voiceAutoRunOn : copy.meeting.voiceAutoRunOff}</div>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={voiceAutoRun ? "secondary" : "outline"}
-                    onClick={() => setVoiceAutoRun((previous) => !previous)}
-                    className="rounded-full px-3"
-                  >
-                    {voiceAutoRun ? copy.meeting.voiceAutoRunLabelOn : copy.meeting.voiceAutoRunLabelOff}
-                  </Button>
+                <div className="mb-3 space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
+
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {availableFeatureLabels.map((label) => (
@@ -3365,7 +3404,8 @@ export function MeetingRoom({
               input={input}
               isSending={isSending}
               sttMode={sttMode}
-              voiceAutoRun={voiceAutoRun}
+              responseMode={responseMode}
+              responseModeOptions={responseModeOptions}
               isListening={isListening}
               isRecording={isRecording}
               browserSpeechSupported={browserSpeechSupported}
@@ -3374,6 +3414,7 @@ export function MeetingRoom({
               onInputChange={setInput}
               onComposerKeyDown={handleComposerKeyDown}
               onMicAction={handleMicAction}
+              onResponseModeChange={setResponseMode}
               onSend={() => void handleSend()}
               onReset={resetMeeting}
             />
