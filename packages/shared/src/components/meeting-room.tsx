@@ -77,7 +77,7 @@ type TradeFormState = {
 };
 
 type DockTab = "session" | "minutes" | "research";
-type WorkspaceFocusTarget = "market" | "stage";
+type WorkspaceFocusTarget = "market" | "stage" | "dock";
 
 function PanelToggleIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -95,6 +95,24 @@ function PanelToggleIcon({ expanded }: { expanded: boolean }) {
           <path d="M12 4h4v4" />
           <path d="M4 12v4h4" />
           <path d="M16 12v4h-4" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function DockVisibilityIcon({ open }: { open: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      {open ? (
+        <>
+          <path d="M15 4v12" />
+          <path d="M11.5 6 7.5 10l4 4" />
+        </>
+      ) : (
+        <>
+          <path d="M5 4v12" />
+          <path d="m8.5 6 4 4-4 4" />
         </>
       )}
     </svg>
@@ -2444,8 +2462,10 @@ function MeetingDebuggerDock({
   copy,
   locale,
   open,
+  isFocused,
   activeTab,
   onToggle,
+  onToggleFocus,
   onTabChange,
   agents,
   timeline,
@@ -2474,8 +2494,10 @@ function MeetingDebuggerDock({
   copy: MeetingCopy;
   locale: AppLocale;
   open: boolean;
+  isFocused: boolean;
   activeTab: DockTab;
   onToggle: () => void;
+  onToggleFocus: () => void;
   onTabChange: (tab: DockTab) => void;
   agents: ReturnType<typeof getAgents>;
   timeline: MeetingTimelineItem[];
@@ -2502,12 +2524,36 @@ function MeetingDebuggerDock({
   onTestOpenClaw: () => void;
 }) {
   const panelCopy = dockPanelCopy(locale);
+  const toggleDockFocusLabel = isFocused
+    ? locale === "ko"
+      ? "도킹 패널 확대 해제"
+      : "Exit dock focus"
+    : locale === "ko"
+      ? "도킹 패널 크게 보기"
+      : "Focus dock panel";
+  const toggleDockVisibilityLabel = open
+    ? locale === "ko"
+      ? "도킹 패널 접기"
+      : "Collapse dock panel"
+    : locale === "ko"
+      ? "도킹 패널 열기"
+      : "Open dock panel";
 
   if (!open) {
     return (
       <Card className="flex min-h-0 flex-col self-stretch overflow-hidden border border-ink/12 bg-white p-2 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:h-[calc(100dvh-14rem)]">
-        <Button type="button" size="sm" variant="outline" onClick={onToggle} className="h-11 w-full rounded-[16px] border-ink/12 bg-white text-ink hover:bg-ink/5">
-          {panelCopy.openDock}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onToggle}
+          className="h-11 w-11 self-center rounded-full border-ink/12 bg-white p-0 text-ink hover:bg-ink/5"
+          title={toggleDockVisibilityLabel}
+          aria-label={toggleDockVisibilityLabel}
+        >
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-ink/10 bg-white/80">
+            <DockVisibilityIcon open={false} />
+          </span>
         </Button>
         <div className="mt-2 grid gap-2">
           {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
@@ -2535,7 +2581,7 @@ function MeetingDebuggerDock({
 
   return (
     <Card className="flex min-h-0 flex-col self-stretch overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:h-[calc(100dvh-14rem)]">
-      <div className="flex items-center justify-between border-b border-ink/8 px-3 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-ink/8 px-3 py-3">
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
             <button
@@ -2553,9 +2599,31 @@ function MeetingDebuggerDock({
             </button>
           ))}
         </div>
-        <Button type="button" size="sm" variant="ghost" onClick={onToggle} className="text-ink hover:bg-ink/5 hover:text-ink">
-          {panelCopy.closeDock}
-        </Button>
+        <div className="flex items-center gap-2 rounded-full border border-ink/10 bg-paper/55 p-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onToggleFocus}
+            className="h-9 w-9 rounded-full p-0 text-ink hover:bg-white"
+            title={toggleDockFocusLabel}
+            aria-label={toggleDockFocusLabel}
+          >
+            <PanelToggleIcon expanded={isFocused} />
+          </Button>
+          <div className="h-5 w-px bg-ink/10" />
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onToggle}
+            className="h-9 w-9 rounded-full p-0 text-ink hover:bg-white"
+            title={toggleDockVisibilityLabel}
+            aria-label={toggleDockVisibilityLabel}
+          >
+            <DockVisibilityIcon open />
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -2627,6 +2695,7 @@ export function MeetingRoom({
   const [focusTarget, setFocusTarget] = useState<WorkspaceFocusTarget | null>(null);
   const isMarketFocused = focusTarget === "market";
   const isStageFocused = focusTarget === "stage";
+  const isDockFocused = focusTarget === "dock";
   const [showAdvancedComposerControls, setShowAdvancedComposerControls] = useState(false);
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
@@ -2733,8 +2802,26 @@ export function MeetingRoom({
           : "bg-ink/28";
   const meetingShellTitle = experienceCopy.meetingOverviewTitle;
   const selectedSnapshotDetail =
-    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" · ") ||
+    [activeTabLabel, describeMarketSession(selectedSnapshot?.session, locale)].filter(Boolean).join(" ? ") ||
     selectedSnapshotSummary;
+  const activeDockTabLabel = experienceCopy.dockTabs[activeDockTab];
+
+  function handleDockToggle() {
+    if (dockOpen && isDockFocused) {
+      setFocusTarget(null);
+    }
+    setDockOpen((previous) => !previous);
+  }
+
+  function toggleDockFocus() {
+    setDockOpen(true);
+    setFocusTarget((previous) => (previous === "dock" ? null : "dock"));
+  }
+
+  function focusDockPanel() {
+    setDockOpen(true);
+    setFocusTarget("dock");
+  }
 
   const availableFeatureLabels = [
     browserSpeechSupported ? copy.meeting.browserStt : null,
@@ -3619,7 +3706,25 @@ async function refreshBtc() {
                 : "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_112px]"
           )}
         >
-          <Card className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden p-4 lg:p-5 xl:h-[calc(100dvh-14rem)]", isStageFocused && "hidden")}>
+          {focusTarget && !isDockFocused ? (
+            <div className="pointer-events-none absolute bottom-4 right-4 z-20 hidden xl:flex">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={focusDockPanel}
+                className="pointer-events-auto h-11 rounded-full px-4 text-xs font-semibold shadow-[0_14px_30px_rgba(18,24,36,0.12)]"
+                title={locale === "ko" ? `${activeDockTabLabel} 열기` : `Open ${activeDockTabLabel}`}
+                aria-label={locale === "ko" ? `${activeDockTabLabel} 열기` : `Open ${activeDockTabLabel}`}
+              >
+                <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-ink/12 bg-white/80">
+                  <DockVisibilityIcon open={false} />
+                </span>
+                <span>{activeDockTabLabel}</span>
+              </Button>
+            </div>
+          ) : null}
+          <Card className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden p-4 lg:p-5 xl:h-[calc(100dvh-14rem)]", (isStageFocused || isDockFocused) && "hidden")}>
             <SectionHeader
               eyebrow={copy.meeting.workspaceEyebrow}
               title={copy.meeting.workspaceTitle}
@@ -3845,7 +3950,7 @@ async function refreshBtc() {
             </div>
           </Card>
 
-          <div className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-[calc(100dvh-14rem)]", isMarketFocused && "hidden")}>
+          <div className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-[calc(100dvh-14rem)]", (isMarketFocused || isDockFocused) && "hidden")}>
             <ParticipantStagePanel
               copy={copy}
               locale={locale}
@@ -3887,13 +3992,15 @@ async function refreshBtc() {
             />
           </div>
 
-          <div className={cn(focusTarget && "hidden")}>
+          <div className={cn((isMarketFocused || isStageFocused) && "hidden")}>
             <MeetingDebuggerDock
             copy={copy}
             locale={locale}
             open={dockOpen}
+            isFocused={isDockFocused}
             activeTab={activeDockTab}
-            onToggle={() => setDockOpen((previous) => !previous)}
+            onToggle={handleDockToggle}
+            onToggleFocus={toggleDockFocus}
             onTabChange={setActiveDockTab}
             agents={agents}
             timeline={timeline}
