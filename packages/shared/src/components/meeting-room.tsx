@@ -77,6 +77,29 @@ type TradeFormState = {
 };
 
 type DockTab = "session" | "minutes" | "research";
+type WorkspaceFocusTarget = "market" | "stage";
+
+function PanelToggleIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      {expanded ? (
+        <>
+          <path d="M4 8h4V4" />
+          <path d="M12 4v4h4" />
+          <path d="M4 12h4v4" />
+          <path d="M12 16v-4h4" />
+        </>
+      ) : (
+        <>
+          <path d="M8 4H4v4" />
+          <path d="M12 4h4v4" />
+          <path d="M4 12v4h4" />
+          <path d="M16 12v4h-4" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 const MINUTES_STORAGE_KEY = "openclawweb.minutes.v1";
 const PERSONA_STORAGE_KEY = "openclawweb.personas.v1";
@@ -1538,8 +1561,16 @@ function ParticipantStagePanel({
             <Button type="button" size="sm" variant="outline" onClick={onToggleCamera} className="h-8 rounded-full">
               {cameraEnabled ? (locale === "ko" ? "카메라 끄기" : "Hide camera") : locale === "ko" ? "카메라 켜기" : "Show camera"}
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={onToggleFocusMode} className="h-8 rounded-full">
-              {focusMode ? (locale === "ko" ? "집중 해제" : "Exit focus") : locale === "ko" ? "집중 모드" : "Focus mode"}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onToggleFocusMode}
+              className="h-10 w-10 rounded-full p-0"
+              title={focusMode ? (locale === "ko" ? "스테이지 축소" : "Collapse stage") : locale === "ko" ? "스테이지 확대" : "Expand stage"}
+              aria-label={focusMode ? (locale === "ko" ? "스테이지 축소" : "Collapse stage") : locale === "ko" ? "스테이지 확대" : "Expand stage"}
+            >
+              <PanelToggleIcon expanded={focusMode} />
             </Button>
           </>
         }
@@ -2593,7 +2624,9 @@ export function MeetingRoom({
   const [dockOpen, setDockOpen] = useState(false);
   const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
   const [activeDockTab, setActiveDockTab] = useState<DockTab>("session");
-  const [focusMode, setFocusMode] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<WorkspaceFocusTarget | null>(null);
+  const isMarketFocused = focusTarget === "market";
+  const isStageFocused = focusTarget === "stage";
   const [showAdvancedComposerControls, setShowAdvancedComposerControls] = useState(false);
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
@@ -3532,6 +3565,7 @@ async function refreshBtc() {
     setTaskArtifacts({});
     setAgentStatus({ assistant: "idle", analyst: "idle" });
     setActiveDockTab("session");
+    setFocusTarget(null);
     setNotice(copy.meeting.notices.reset);
   }
 
@@ -3544,7 +3578,6 @@ async function refreshBtc() {
               <Badge>{copy.meeting.headerBadge}</Badge>
               <Badge variant="signal">{experienceCopy.marketHubEyebrow}</Badge>
               <Badge variant="outline">{copy.meeting.tabBadge(activeTabLabel)}</Badge>
-              {focusMode ? <Badge variant="outline">{locale === "ko" ? "집중 모드" : "Focus mode"}</Badge> : null}
             </div>
             <div className="space-y-3">
               <h1 className="max-w-4xl font-display text-3xl font-semibold md:text-[2.8rem]">{meetingShellTitle}</h1>
@@ -3579,18 +3612,31 @@ async function refreshBtc() {
         <div
           className={cn(
             "grid min-h-0 flex-1 gap-3 xl:items-stretch",
-            focusMode
+              focusTarget
               ? "xl:grid-cols-1"
               : dockOpen
                 ? "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_minmax(320px,360px)]"
                 : "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_112px]"
           )}
         >
-          <Card className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden p-4 lg:p-5 xl:h-[calc(100dvh-14rem)]", focusMode && "hidden")}>
+          <Card className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden p-4 lg:p-5 xl:h-[calc(100dvh-14rem)]", isStageFocused && "hidden")}>
             <SectionHeader
               eyebrow={copy.meeting.workspaceEyebrow}
               title={copy.meeting.workspaceTitle}
               description={selectedSnapshot?.headline || experienceCopy.marketHubDescription}
+              actions={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setFocusTarget((previous) => (previous === "market" ? null : "market"))}
+                  className="h-10 w-10 rounded-full p-0"
+                  title={isMarketFocused ? (locale === "ko" ? "시장 패널 축소" : "Collapse market panel") : locale === "ko" ? "시장 패널 확대" : "Expand market panel"}
+                  aria-label={isMarketFocused ? (locale === "ko" ? "시장 패널 축소" : "Collapse market panel") : locale === "ko" ? "시장 패널 확대" : "Expand market panel"}
+                >
+                  <PanelToggleIcon expanded={isMarketFocused} />
+                </Button>
+              }
             />
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-3">
@@ -3799,7 +3845,7 @@ async function refreshBtc() {
             </div>
           </Card>
 
-          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-[calc(100dvh-14rem)]">
+          <div className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-[calc(100dvh-14rem)]", isMarketFocused && "hidden")}>
             <ParticipantStagePanel
               copy={copy}
               locale={locale}
@@ -3809,7 +3855,7 @@ async function refreshBtc() {
               cameraEnabled={cameraEnabled}
               cameraReady={cameraReady}
               videoRef={videoRef}
-              focusMode={focusMode}
+              focusMode={isStageFocused}
               activeTabLabel={activeTabLabel}
               snapshotStatusLabel={selectedSnapshotStatusLabel}
               snapshotDetail={selectedSnapshotDetail}
@@ -3833,7 +3879,7 @@ async function refreshBtc() {
               onMicAction={handleMicAction}
               onSpeedModeChange={setSpeedMode}
               onToggleAdvancedControls={() => setShowAdvancedComposerControls((previous) => !previous)}
-              onToggleFocusMode={() => setFocusMode((previous) => !previous)}
+              onToggleFocusMode={() => setFocusTarget((previous) => (previous === "stage" ? null : "stage"))}
               onToggleCamera={() => setCameraEnabled((previous) => !previous)}
               onResponseModeChange={setResponseMode}
               onSend={() => void handleSend()}
@@ -3841,7 +3887,7 @@ async function refreshBtc() {
             />
           </div>
 
-          <div className={cn(focusMode && "hidden")}>
+          <div className={cn(focusTarget && "hidden")}>
             <MeetingDebuggerDock
             copy={copy}
             locale={locale}
