@@ -198,6 +198,8 @@ export type MeetingSessionRecord = {
 
 export type MeetingResponseMode = "auto" | "assistant" | "analyst" | "both";
 
+export type MeetingSpeedMode = "balanced" | "fast";
+
 export type MeetingRoundRequest = {
   message: string;
   history: ChatHistoryItem[];
@@ -208,6 +210,7 @@ export type MeetingRoundRequest = {
   locale?: AppLocale;
   personaOverrides?: AgentPersonaOverrides;
   responseMode?: MeetingResponseMode;
+  speedMode?: MeetingSpeedMode;
 };
 
 export type MeetingRoundStopReason =
@@ -223,6 +226,11 @@ export type MeetingRoundMeta = {
   researchAgentId?: AgentId;
   researchStatus?: MeetingTaskStatus;
   stopReason: MeetingRoundStopReason;
+  timings?: {
+    providerMs: number;
+    totalMs: number;
+    resolvedChatPath?: string;
+  };
 };
 
 export type MeetingRoundResearch = {
@@ -238,6 +246,59 @@ export type MeetingRoundResponse = {
   research?: MeetingRoundResearch;
   actions?: MeetingAction[];
 };
+
+export type MeetingRoundStreamEvent =
+  | {
+      type: "start";
+      ts: string;
+      firstSpeakerId: AgentId;
+      responseMode: MeetingResponseMode;
+    }
+  | {
+      type: "turn_start";
+      ts: string;
+      turnId: string;
+      agentId: AgentId;
+      phase: RoundPhase;
+      speakerLabel: string;
+      provider: Provider;
+    }
+  | {
+      type: "turn_partial";
+      ts: string;
+      turnId: string;
+      agentId: AgentId;
+      phase: RoundPhase;
+      text: string;
+      provider: Provider;
+    }
+  | {
+      type: "turn_complete";
+      ts: string;
+      turn: MeetingTurn;
+    }
+  | {
+      type: "research_start";
+      ts: string;
+      agentId: AgentId;
+      instruction: string;
+      url?: string;
+    }
+  | {
+      type: "research_complete";
+      ts: string;
+      research: MeetingRoundResearch;
+    }
+  | {
+      type: "final";
+      ts: string;
+      response: MeetingRoundResponse;
+    }
+  | {
+      type: "error";
+      ts: string;
+      message: string;
+    };
 
 export type Capabilities = {
   openaiStt: boolean;

@@ -3,6 +3,7 @@ import { getAgentsById } from "@/lib/meeting/agents";
 import { getActionItemFieldLabels, getRoleDefinitionForAgent } from "@/lib/meeting/role-definitions";
 import {
   callOpenClawMeetingChat,
+  streamOpenClawMeetingChat,
   type OpenClawMeetingChatResult
 } from "@/lib/openclaw/client";
 import type { AgentId, ChatHistoryItem, MeetingAction, Provider, RoundPhase } from "@/lib/meeting/types";
@@ -19,6 +20,8 @@ export type CallLLMArgs = {
   history: ChatHistoryItem[];
   locale?: AppLocale;
   requiredSections?: string[];
+  maxTokens?: number;
+  onPartialText?: (text: string) => void | Promise<void>;
 };
 
 export type CallLLMResult = {
@@ -26,6 +29,9 @@ export type CallLLMResult = {
   provider: Provider;
   model?: string;
   citations?: OpenClawMeetingChatResult["citations"];
+  elapsedMs?: number;
+  resolvedPath?: string;
+  streamed?: boolean;
 };
 
 function getForcedProvider(): Provider | undefined {
@@ -227,6 +233,7 @@ async function callProviderWithValidation(provider: Provider, args: CallLLMArgs)
   const locale = args.locale ?? DEFAULT_LOCALE;
   const retry = await callSingleProvider(provider, {
     ...args,
+    onPartialText: undefined,
     message: buildStructuredRetryMessage(args.message, args.requiredSections, locale)
   });
 
@@ -245,21 +252,41 @@ async function callSingleProvider(provider: Provider, args: CallLLMArgs): Promis
     };
   }
   if (provider === "openclaw") {
-    const result = await callOpenClawMeetingChat({
-      agentId: args.agentId,
-      phase: args.phase,
-      systemPrompt: args.agentSystemPrompt,
-      message: args.message,
-      history: args.history,
-      locale: args.locale,
-      mode: "meeting"
-    });
+    const result = args.onPartialText
+      ? await streamOpenClawMeetingChat(
+          {
+            agentId: args.agentId,
+            phase: args.phase,
+            systemPrompt: args.agentSystemPrompt,
+            message: args.message,
+            history: args.history,
+            locale: args.locale,
+            mode: "meeting",
+            maxTokens: args.maxTokens
+          },
+          {
+            onPartialText: args.onPartialText
+          }
+        )
+      : await callOpenClawMeetingChat({
+          agentId: args.agentId,
+          phase: args.phase,
+          systemPrompt: args.agentSystemPrompt,
+          message: args.message,
+          history: args.history,
+          locale: args.locale,
+          mode: "meeting",
+          maxTokens: args.maxTokens
+        });
 
     return {
       provider,
       text: result.text,
       model: result.model,
-      citations: result.citations
+      citations: result.citations,
+      elapsedMs: result.elapsedMs,
+      resolvedPath: result.resolvedPath,
+      streamed: result.streamed
     };
   }
   if (provider === "cerebras") {
@@ -280,7 +307,6 @@ async function callSingleProvider(provider: Provider, args: CallLLMArgs): Promis
     text: await callOpenAI(args)
   };
 }
-
 function getAnalystSections(locale: AppLocale) {
   return getRoleDefinitionForAgent("analyst", locale).outputFormat.sections;
 }

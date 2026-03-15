@@ -23,7 +23,8 @@ export async function POST(request: Request) {
         minutes: body.minutes ?? null,
         locale: resolveAppLocale(body.locale),
         personaOverrides: body.personaOverrides,
-        responseMode: body.responseMode
+        responseMode: body.responseMode,
+        speedMode: body.speedMode
       })
     );
   } catch (error) {

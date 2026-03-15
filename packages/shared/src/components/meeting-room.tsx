@@ -19,8 +19,11 @@ import type {
   ChatHistoryItem,
   OpenClawConnectionProbe,
   MeetingMinutes,
+  MeetingRoundRequest,
   MeetingRoundResponse,
   MeetingResponseMode,
+  MeetingSpeedMode,
+  MeetingRoundStreamEvent,
   MeetingSessionRecord,
   MeetingTask,
   MeetingTaskArtifacts,
@@ -92,6 +95,7 @@ const SMALL_SELECT_CLASS_NAME =
 type MetricTone = "default" | "cobalt" | "mint" | "ember";
 type MeetingCopy = ReturnType<typeof getDictionary>;
 type ResponseModeOption = { value: MeetingResponseMode; label: string };
+type SpeedModeOption = { value: MeetingSpeedMode; label: string };
 
 const PERSONA_AVATAR_THEMES: Record<
   AgentAvatarVariant,
@@ -105,7 +109,7 @@ const PERSONA_AVATAR_THEMES: Record<
   }
 > = {
   aurora: {
-    label: { ko: "\uC624\uB85C\uB77C", en: "Aurora" },
+    label: { ko: "오로라", en: "Aurora" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-emerald-200/70 bg-emerald-50 text-ink",
@@ -113,7 +117,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-emerald-300 bg-white"
   },
   graphite: {
-    label: { ko: "\uADF8\uB798\uD30C\uC774\uD2B8", en: "Graphite" },
+    label: { ko: "그래파이트", en: "Graphite" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-slate-200 bg-slate-50 text-ink",
@@ -121,7 +125,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-slate-300 bg-white"
   },
   sunset: {
-    label: { ko: "\uC120\uC14B", en: "Sunset" },
+    label: { ko: "선셋", en: "Sunset" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-amber-200 bg-amber-50 text-ink",
@@ -129,7 +133,7 @@ const PERSONA_AVATAR_THEMES: Record<
     previewClass: "border-t-4 border-amber-300 bg-white"
   },
   lagoon: {
-    label: { ko: "\uB77C\uAD70", en: "Lagoon" },
+    label: { ko: "라군", en: "Lagoon" },
     shellClass: "bg-white",
     haloClass: "hidden",
     badgeClass: "border-cyan-200 bg-cyan-50 text-ink",
@@ -145,25 +149,32 @@ const PERSONA_AVATAR_PRESETS: Record<
   }
 > = {
   core: {
-    label: { ko: "\uCF54\uC5B4", en: "Core" }
+    label: { ko: "코어", en: "Core" }
   },
   orbit: {
-    label: { ko: "\uC624\uBE57", en: "Orbit" }
+    label: { ko: "오빗", en: "Orbit" }
   },
   signal: {
-    label: { ko: "\uC2DC\uADF8\uB110", en: "Signal" }
+    label: { ko: "시그널", en: "Signal" }
   },
   grid: {
-    label: { ko: "\uADF8\uB9AC\uB4DC", en: "Grid" }
+    label: { ko: "그리드", en: "Grid" }
   }
 };
 function getResponseModeOptions(locale: AppLocale, assistantLabel: string, analystLabel: string): ResponseModeOption[] {
-  return [
-    { value: "auto", label: locale === "ko" ? "자동" : "Auto" },
-    { value: "analyst", label: locale === "ko" ? `${analystLabel}만` : `${analystLabel} only` },
-    { value: "assistant", label: locale === "ko" ? `${assistantLabel}만` : `${assistantLabel} only` },
-    { value: "both", label: locale === "ko" ? "둘 다" : "Both" }
-  ];
+  return locale === "ko"
+    ? [
+        { value: "auto", label: "자동" },
+        { value: "analyst", label: `${analystLabel}만` },
+        { value: "assistant", label: `${assistantLabel}만` },
+        { value: "both", label: "둘 다" }
+      ]
+    : [
+        { value: "auto", label: "Auto" },
+        { value: "analyst", label: `${analystLabel} only` },
+        { value: "assistant", label: `${assistantLabel} only` },
+        { value: "both", label: "Both" }
+      ];
 }
 
 function getResponseModeCaption(mode: MeetingResponseMode, options: ResponseModeOption[], locale: AppLocale) {
@@ -171,6 +182,22 @@ function getResponseModeCaption(mode: MeetingResponseMode, options: ResponseMode
   return locale === "ko" ? `답변 대상: ${label}` : `Reply target: ${label}`;
 }
 
+function getSpeedModeOptions(locale: AppLocale): SpeedModeOption[] {
+  return locale === "ko"
+    ? [
+        { value: "fast", label: "빠른 응답" },
+        { value: "balanced", label: "정식 회의" }
+      ]
+    : [
+        { value: "fast", label: "Fast reply" },
+        { value: "balanced", label: "Full meeting" }
+      ];
+}
+
+function getSpeedModeCaption(mode: MeetingSpeedMode, options: SpeedModeOption[], locale: AppLocale) {
+  const label = options.find((option) => option.value === mode)?.label ?? options[0]?.label ?? "";
+  return locale === "ko" ? `응답 모드: ${label}` : `Response mode: ${label}`;
+}
 function getPendingAgentStatus(mode: MeetingResponseMode): Record<AgentId, AgentStatus> {
   if (mode === "assistant") {
     return { assistant: "thinking", analyst: "idle" };
@@ -185,10 +212,10 @@ function getPendingAgentStatus(mode: MeetingResponseMode): Record<AgentId, Agent
 
 const MARKET_SESSION_LABELS: Record<AppLocale, Record<Exclude<MarketSessionState, "always">, string>> = {
   ko: {
-    open: "\uac1c\uc7a5",
-    pre: "\uc7a5\uc804",
-    post: "\uc2dc\uac04\uc678",
-    closed: "\ud734\uc7a5"
+    open: "개장",
+    pre: "장전",
+    post: "시간외",
+    closed: "휴장"
   },
   en: {
     open: "Open",
@@ -211,11 +238,11 @@ function describeMarketSession(session: MarketSessionState | undefined, locale: 
     case "closed":
       return locale === "ko" ? "시장 휴장 · 마지막 종가 기준" : "Market closed · last close";
     case "pre":
-      return locale === "ko" ? "\uc7a5\uc804 \uc2dc\uc138 \uad6c\uac04" : "Pre-market session";
+      return locale === "ko" ? "장전 시세 구간" : "Pre-market session";
     case "post":
-      return locale === "ko" ? "\uc2dc\uac04\uc678 \uc2dc\uc138 \uad6c\uac04" : "After-hours session";
+      return locale === "ko" ? "시간외 시세 구간" : "After-hours session";
     case "open":
-      return locale === "ko" ? "\uc815\uaddc\uc7a5 \uc9c4\ud589 \uc911" : "Regular session";
+      return locale === "ko" ? "정규장 진행 중" : "Regular session";
     default:
       return "";
   }
@@ -227,11 +254,11 @@ function getSnapshotUpdatedLabel(
   fallbackLabel: string
 ) {
   if (snapshot?.session === "closed") {
-    return locale === "ko" ? "\ub9c8\uc9c0\ub9c9 \uc885\uac00" : "Last close";
+    return locale === "ko" ? "마지막 종가" : "Last close";
   }
 
   if (snapshot?.session === "post") {
-    return locale === "ko" ? "\ucd5c\uc2e0 \uccb4\uacb0" : "Latest trade";
+    return locale === "ko" ? "최신 체결" : "Latest trade";
   }
 
   return fallbackLabel;
@@ -313,8 +340,86 @@ function formatMarketVolume(value: number | undefined, locale: string) {
   }).format(value);
 }
 
-function createTimelineItem(item: Omit<MeetingTimelineItem, "id">): MeetingTimelineItem {
-  return { id: uid("timeline"), ...item };
+function createTimelineItem(item: Omit<MeetingTimelineItem, "id"> & { id?: string }): MeetingTimelineItem {
+  return { id: item.id ?? uid("timeline"), ...item };
+}
+
+
+async function fetchMeetingRoundStream(
+  request: MeetingRoundRequest,
+  onEvent: (event: MeetingRoundStreamEvent) => void | Promise<void>
+) {
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    cache: "no-store"
+  };
+
+  const response = await fetch("/api/meeting/round/stream", requestInit);
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `${response.status}`);
+  }
+
+  if (!response.body) {
+    const fallback = await fetch("/api/meeting/round", requestInit);
+    if (!fallback.ok) {
+      const text = await fallback.text().catch(() => "");
+      throw new Error(text || `${fallback.status}`);
+    }
+    return (await fallback.json()) as MeetingRoundResponse;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: MeetingRoundResponse | null = null;
+
+  const flushLine = async (line: string) => {
+    if (!line.trim()) {
+      return;
+    }
+
+    const event = JSON.parse(line) as MeetingRoundStreamEvent;
+    if (event.type === "final") {
+      finalResponse = event.response;
+      return;
+    }
+
+    if (event.type === "error") {
+      throw new Error(event.message);
+    }
+
+    await onEvent(event);
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n");
+    while (boundary !== -1) {
+      const line = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 1);
+      await flushLine(line);
+      boundary = buffer.indexOf("\n");
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    await flushLine(buffer.trim());
+  }
+
+  if (!finalResponse) {
+    throw new Error("Meeting stream ended before the final response arrived.");
+  }
+
+  return finalResponse;
 }
 
 function pickSpeechMimeType() {
@@ -428,47 +533,47 @@ function AgentAvatarBadge({
 function dockPanelCopy(locale: AppLocale) {
   return locale === "ko"
     ? {
-        stageNotice: "\uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uC801\uD569\uD55C AI\uAC00 \uBA3C\uC800 \uB2F5\uD558\uACE0, \uD544\uC694\uD558\uBA74 \uC870\uC0AC\uAE4C\uC9C0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4.",
-        liveScriptEyebrow: "\uB77C\uC774\uBE0C \uC2A4\uD06C\uB9BD\uD2B8",
-        liveScriptTitle: "\uD68C\uC758 \uB300\uD654",
-        liveScriptDescription: "\uBA54\uC778 \uBC1C\uD45C \uD750\uB984\uACFC \uC2E4\uC81C \uCC44\uD305\uC744 \uD55C \uC2A4\uD2B8\uB9BC\uC73C\uB85C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
-        autoRouting: "AI \uC790\uB3D9 \uB77C\uC6B0\uD305",
-        userCameraEyebrow: "\uB0B4 \uCE74\uBA54\uB77C",
-        userCameraTitle: "\uB85C\uCEEC \uD654\uBA74",
-        userCameraDescription: "\uB0B4 \uCE74\uBA54\uB77C \uBBF8\uB9AC\uBCF4\uAE30\uB294 \uC624\uB978\uCABD \uC544\uB798\uC5D0 \uACE0\uC815\uB429\uB2C8\uB2E4.",
-        dockEyebrow: "\uB3C4\uD0B9 \uD328\uB110",
-        dockTitle: "\uD3B8\uC9D1 / \uD68C\uC758\uB85D / \uC870\uC0AC",
-        dockDescription: "\uC624\uB978\uCABD \uD328\uB110\uC5D0\uC11C AI \uD398\uB974\uC18C\uB098, \uD68C\uC758\uB85D, \uC870\uC0AC \uACB0\uACFC\uB97C \uBE60\uB974\uAC8C \uD655\uC778\uD569\uB2C8\uB2E4.",
+        stageNotice: "메시지를 보내면 적합한 AI가 먼저 답하고, 필요하면 조사까지 이어집니다.",
+        liveScriptEyebrow: "라이브 스크립트",
+        liveScriptTitle: "회의 대화",
+        liveScriptDescription: "메인 발표 흐름과 실제 채팅을 한 스트림으로 정리합니다.",
+        autoRouting: "AI 자동 라우팅",
+        userCameraEyebrow: "내 카메라",
+        userCameraTitle: "로컬 화면",
+        userCameraDescription: "내 카메라 미리보기는 오른쪽 아래에 고정됩니다.",
+        dockEyebrow: "도킹 패널",
+        dockTitle: "편집 / 회의록 / 조사",
+        dockDescription: "오른쪽 패널에서 AI 페르소나, 회의록, 조사 결과를 빠르게 확인합니다.",
         dockTabs: {
-          session: "\uD3B8\uC9D1",
-          minutes: "\uD68C\uC758\uB85D",
-          research: "\uC870\uC0AC\uAE30\uB85D"
+          session: "편집",
+          minutes: "회의록",
+          research: "조사기록"
         } satisfies Record<DockTab, string>,
-        dockOpen: "\uD328\uB110 \uC5F4\uB9BC",
-        dockClosed: "\uD328\uB110 \uB2EB\uD798",
-        openDock: "\uC5F4\uAE30",
-        closeDock: "\uC811\uAE30",
-        personaEyebrow: "AI \uD398\uB974\uC18C\uB098 \uD3B8\uC9D1",
-        personaTitle: "\uC774\uB984 / \uB9D0\uD22C / \uCE74\uB4DC",
-        personaDescription: "\uC11C\uC724\uACFC \uC774\uC548\uC758 \uD45C\uC2DC \uC774\uB984, \uB9D0\uD22C, \uC544\uBC14\uD0C0 \uD504\uB9AC\uC14B, \uCE74\uB4DC \uD14C\uB9C8\uB97C \uC870\uC815\uD569\uB2C8\uB2E4.",
-        displayNameLabel: "\uC774\uB984",
-        toneLabel: "\uB9D0\uD22C",
-        avatarLabel: "\uC544\uBC14\uD0C0",
-        avatarToneLabel: "\uCE74\uB4DC \uD14C\uB9C8",
-        resetPersona: "\uCD08\uAE30\uD654",
-        sessionActivity: "\uD3B8\uC9D1 \uB85C\uADF8",
-        sessionEmpty: "\uC544\uC9C1 \uD3B8\uC9D1 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
-        sessionWorkspace: "\uD65C\uC131 \uC2DC\uC7A5",
-        sessionParticipants: "\uD45C\uC2DC \uC778\uC6D0",
-        sessionSavedAt: "\uCD5C\uADFC \uD68C\uC758\uB85D",
-        localeLabel: "\uC5B8\uC5B4",
-        openSettings: "\uC124\uC815",
-        minutesHistory: "\uC800\uC7A5\uB41C \uD68C\uC758\uB85D",
-        researchNotes: "\uC870\uC0AC \uBA54\uBAA8",
-        researchHistory: "\uC870\uC0AC \uAE30\uB85D",
-        researchStatus: "\uC870\uC0AC \uC0C1\uD0DC",
-        marketHubEyebrow: "\uC2DC\uC7A5 \uD5C8\uBE0C",
-        marketHubDescription: "\uC67C\uCABD\uC5D0\uC11C \uC2DC\uC7A5\uC744 \uBCF4\uACE0, \uC624\uB978\uCABD\uC5D0\uC11C \uACB0\uC815\uACFC \uAE30\uB85D\uC744 \uC774\uC5B4\uAC11\uB2C8\uB2E4.",
+        dockOpen: "패널 열림",
+        dockClosed: "패널 닫힘",
+        openDock: "열기",
+        closeDock: "접기",
+        personaEyebrow: "AI 페르소나 편집",
+        personaTitle: "이름 / 말투 / 카드",
+        personaDescription: "서윤과 이안의 표시 이름, 말투, 아바타 프리셋, 카드 테마를 조정합니다.",
+        displayNameLabel: "이름",
+        toneLabel: "말투",
+        avatarLabel: "아바타",
+        avatarToneLabel: "카드 테마",
+        resetPersona: "초기화",
+        sessionActivity: "편집 로그",
+        sessionEmpty: "아직 편집 기록이 없습니다.",
+        sessionWorkspace: "활성 시장",
+        sessionParticipants: "표시 인원",
+        sessionSavedAt: "최근 회의록",
+        localeLabel: "언어",
+        openSettings: "설정",
+        minutesHistory: "저장된 회의록",
+        researchNotes: "조사 메모",
+        researchHistory: "조사 기록",
+        researchStatus: "조사 상태",
+        marketHubEyebrow: "시장 허브",
+        marketHubDescription: "왼쪽에서 시장을 보고, 오른쪽에서 결정과 기록을 이어갑니다.",
         meetingOverviewTitle: "Workspace"
       }
     : {
@@ -520,7 +625,7 @@ function dockPanelCopy(locale: AppLocale) {
 function extractHistory(items: MeetingTimelineItem[]): ChatHistoryItem[] {
   return items
     .filter((item) => item.kind === "message" && (item.speakerType === "user" || item.speakerType === "agent"))
-    .slice(-10)
+    .slice(-4)
     .map((item) =>
       item.speakerType === "user"
         ? { role: "user", content: item.text }
@@ -653,7 +758,7 @@ function MarketQuoteCard({
       <div className="relative">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="rounded-full border border-ink/10 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink">
                 {quote.symbol}
               </span>
@@ -848,7 +953,7 @@ function SnapshotOverview({
   const normalizedPriceChangeDetail = priceChangeDetail;
   return (
     <div className={cn("mb-4 overflow-hidden rounded-[30px] border border-ink/10 p-6 text-white shadow-panel", heroAccent)}>
-      <div className="grid gap-4">
+      <div className="mt-4 grid min-h-0 flex-1 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
         <div className="relative">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{copy.meeting.tabBadge(tabLabels[activeTab])}</Badge>
@@ -999,7 +1104,7 @@ function BroadcastSpeakerCard({
   return (
     <div
       className={cn(
-        "relative flex min-h-[320px] flex-col justify-between overflow-hidden rounded-[30px] border border-ink/10 p-5 text-ink shadow-[0_22px_48px_rgba(18,24,36,0.08)]",
+        "relative flex h-full min-h-[288px] flex-col justify-between overflow-hidden rounded-[30px] border border-ink/10 p-5 text-ink shadow-[0_22px_48px_rgba(18,24,36,0.08)]",
         theme.shellClass,
         status === "thinking" && "status-ring-thinking",
         status === "speaking" && "status-ring-speaking",
@@ -1016,7 +1121,7 @@ function BroadcastSpeakerCard({
           {copy.agentStatus[status]}
         </Badge>
       </div>
-        <div className="relative mt-8 flex flex-1 flex-col justify-between gap-6">
+        <div className="relative mt-6 flex flex-1 flex-col justify-between gap-5">
           <div className="flex items-start gap-4">
             <AgentAvatarBadge name={agent.name} preset={agent.avatarPreset} themeClass={theme.avatarClass} size="lg" />
           <div className="min-w-0 space-y-2">
@@ -1027,12 +1132,50 @@ function BroadcastSpeakerCard({
             </div>
           </div>
         </div>
-        <div className="rounded-[26px] border border-ink/10 bg-white/90 p-5">
+        <div className="rounded-[26px] border border-ink/10 bg-white/90 p-4">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{agent.emoji}</div>
-          <p className="line-clamp-5 text-sm leading-6 text-ink/84">{latestMessage}</p>
+          <p className="line-clamp-4 text-sm leading-6 text-ink/84">{latestMessage}</p>
         </div>
       </div>
     </div>
+  );
+}
+function UserCameraDockCard({
+  locale,
+  copy,
+  cameraReady,
+  videoRef,
+  snapshotUpdatedAt
+}: {
+  locale: AppLocale;
+  copy: MeetingCopy;
+  cameraReady: boolean;
+  videoRef: RefObject<HTMLVideoElement>;
+  snapshotUpdatedAt: string;
+}) {
+  const panelCopy = dockPanelCopy(locale);
+
+  return (
+    <Card className="flex h-full min-h-[288px] flex-col p-4">
+      <SectionHeader
+        eyebrow={panelCopy.userCameraEyebrow}
+        title={panelCopy.userCameraTitle}
+        badge={<Badge variant="outline">{snapshotUpdatedAt}</Badge>}
+        description={panelCopy.userCameraDescription}
+      />
+      <div className="relative mt-4 flex min-h-0 flex-1 overflow-hidden rounded-[26px] border border-ink/10 bg-[linear-gradient(180deg,rgba(16,25,39,0.94),rgba(27,39,58,0.9))] shadow-[0_18px_42px_rgba(18,24,36,0.12)]">
+        <video ref={videoRef} autoPlay muted playsInline className={cn("h-full w-full object-cover", !cameraReady && "hidden")} />
+        {cameraReady ? (
+          <div className="absolute left-3 top-3 rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white backdrop-blur-md">
+            {copy.meeting.localCam}
+          </div>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center px-6 text-center text-sm leading-6 text-white/78">
+            {copy.meeting.cameraFallback}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -1049,11 +1192,16 @@ function MeetingScriptConsolePanel({
   openAiSttSupported,
   responseMode,
   responseModeOptions,
+  speedMode,
+  speedModeOptions,
+  showAdvancedControls,
   composerRef,
   onInputChange,
   onComposerKeyDown,
   onMicAction,
   onResponseModeChange,
+  onSpeedModeChange,
+  onToggleAdvancedControls,
   onSend,
   onReset
 }: {
@@ -1069,20 +1217,56 @@ function MeetingScriptConsolePanel({
   openAiSttSupported: boolean;
   responseMode: MeetingResponseMode;
   responseModeOptions: ResponseModeOption[];
+  speedMode: MeetingSpeedMode;
+  speedModeOptions: SpeedModeOption[];
+  showAdvancedControls: boolean;
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicAction: () => void;
   onResponseModeChange: (mode: MeetingResponseMode) => void;
+  onSpeedModeChange: (mode: MeetingSpeedMode) => void;
+  onToggleAdvancedControls: () => void;
   onSend: () => void;
   onReset: () => void;
-}) {  const panelCopy = dockPanelCopy(locale);
+}) {
+  const panelCopy = dockPanelCopy(locale);
   const timelineItems = timeline ?? [];
-  const scriptEntries = timelineItems.filter((item) => item.kind === "message").slice(-10);
+  const scriptEntries = timelineItems.filter((item) => item.kind === "message");
   const activeResponseModeLabel = getResponseModeCaption(responseMode, responseModeOptions, locale);
+  const activeSpeedModeLabel = getSpeedModeCaption(speedMode, speedModeOptions, locale);
+  const activeResponseModeOption = responseModeOptions.find((option) => option.value === responseMode)?.label ?? "";
+  const activeSpeedModeOption = speedModeOptions.find((option) => option.value === speedMode)?.label ?? "";
+  const hasAdvancedOverrides = responseMode !== "auto" || speedMode !== "fast";
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const viewport = transcriptRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    if (!viewport) {
+      return;
+    }
+
+    const handleScroll = () => {
+      stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 72;
+    };
+
+    handleScroll();
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) {
+      return;
+    }
+
+    transcriptEndRef.current?.scrollIntoView({ block: "end" });
+  }, [scriptEntries.length]);
 
   return (
-    <div className="flex min-h-0 flex-col rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_24px_56px_rgba(18,24,36,0.08)]">
+    <div className="flex h-full min-h-0 flex-col rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_24px_56px_rgba(18,24,36,0.08)]">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="section-kicker">{panelCopy.liveScriptEyebrow}</div>
@@ -1090,90 +1274,150 @@ function MeetingScriptConsolePanel({
           <p className="max-w-3xl text-sm text-mist">{panelCopy.liveScriptDescription}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{panelCopy.autoRouting}</Badge>
+          <Badge variant="secondary">{isSending ? copy.meeting.runningMeeting : panelCopy.autoRouting}</Badge>
           <Badge variant="outline">{copy.meeting.participants(3)}</Badge>
         </div>
       </div>
 
-      <ScrollArea className="meeting-column-scroll min-h-0 flex-1 rounded-[26px] border border-ink/10 bg-white p-3">
-        <div className="space-y-3">
-          {scriptEntries.length > 0 ? (
-            scriptEntries.map((item) => {
-              const isUser = item.speakerType === "user";
-              const isAgent = item.speakerType === "agent";
-              return (
-                <div
-                  key={item.id}
-                  className={cn(
-                    "max-w-[92%] rounded-[24px] border px-4 py-3 shadow-[0_14px_34px_rgba(18,24,36,0.04)]",
-                    isUser && "ml-auto border-ink/28 bg-white text-ink",
-                    isAgent && "mr-auto border-cobalt/12 bg-white text-ink",
-                    !isUser && !isAgent && "mr-auto border-ink/10 bg-white text-ink"
-                  )}
-                >
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em]">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-mist">{item.speakerLabel}</span>
-                      {item.badge ? <Badge variant="outline">{labelForBadge(item.badge, locale)}</Badge> : null}
-                    </div>
-                    <span className="text-mist">{formatTime(item.ts, copy.app.dateLocale)}</span>
-                  </div>
-                  <div className="whitespace-pre-wrap text-sm leading-6 text-ink/88">{item.text}</div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="rounded-[22px] border border-dashed border-ink/12 bg-white/55 px-4 py-10 text-center text-sm text-mist">
-              {copy.meeting.timelineEmpty}
-            </div>
-          )}
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2 rounded-[20px] border border-ink/10 bg-paper/55 px-3 py-3">
+        <div className="min-w-0 space-y-1">
+          <div className="text-xs font-semibold text-ink">
+            {hasAdvancedOverrides
+              ? locale === "ko"
+                ? "지금 맞춤 답변 설정으로 진행 중입니다."
+                : "Custom reply settings are active."
+              : locale === "ko"
+                ? "기본 빠른 회의 흐름으로 진행 중입니다."
+                : "The default fast meeting flow is active."}
+          </div>
+          <div className="text-xs leading-5 text-mist">{copy.meeting.browserMicHint}</div>
         </div>
-      </ScrollArea>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {hasAdvancedOverrides ? <Badge variant="outline">{activeResponseModeOption}</Badge> : null}
+          {speedMode !== "fast" ? <Badge variant="outline">{activeSpeedModeOption}</Badge> : null}
+          <Button type="button" size="sm" variant="outline" onClick={onToggleAdvancedControls}>
+            {showAdvancedControls
+              ? locale === "ko"
+                ? "설정 닫기"
+                : "Hide settings"
+              : locale === "ko"
+                ? "고급 설정"
+                : "Advanced settings"}
+          </Button>
+        </div>
+      </div>
+
+      <div ref={transcriptRef} className="min-h-0 flex-1">
+        <ScrollArea className="meeting-column-scroll h-full min-h-0 rounded-[26px] border border-ink/10 bg-white p-3">
+          <div className="space-y-3">
+            {scriptEntries.length > 0 ? (
+              scriptEntries.map((item) => {
+                const isUser = item.speakerType === "user";
+                const isAgent = item.speakerType === "agent";
+                const isSystem = item.speakerType === "system";
+                return (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      "max-w-[92%] rounded-[24px] border px-4 py-3 shadow-[0_14px_34px_rgba(18,24,36,0.04)]",
+                      isUser && "ml-auto border-ink/28 bg-white text-ink",
+                      isAgent && "mr-auto border-cobalt/12 bg-white text-ink",
+                      isSystem && "mr-auto border-ink/8 bg-paper/70 text-ink/78"
+                    )}
+                  >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em]">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="font-semibold text-mist">{item.speakerLabel}</span>
+                        {item.badge ? <Badge variant="outline">{labelForBadge(item.badge, locale)}</Badge> : null}
+                      </div>
+                      <span className="text-mist">{formatTime(item.ts, copy.app.dateLocale)}</span>
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-6 text-ink/88">{item.text}</div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="rounded-[22px] border border-dashed border-ink/12 bg-white/55 px-4 py-10 text-center text-sm text-mist">
+                {copy.meeting.timelineEmpty}
+              </div>
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
+        </ScrollArea>
+      </div>
 
       <form
-        className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_136px]"
+        className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_136px]"
         onSubmit={(event) => {
           event.preventDefault();
           void onSend();
         }}
       >
         <div className="min-w-0 rounded-[28px] border border-cobalt/10 bg-white p-3 shadow-[0_18px_42px_rgba(18,24,36,0.05)]">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onMicAction}
-                disabled={(sttMode === "browser" && !browserSpeechSupported) || (sttMode === "whisper" && !openAiSttSupported) || isSending}
-              >
-                {sttMode === "browser"
-                  ? isListening
-                    ? copy.meeting.stopMic
-                    : copy.meeting.speakAndRun
-                  : isRecording
-                    ? copy.meeting.stopWhisper
-                    : copy.meeting.whisperAndRun}
-              </Button>
-              <Badge variant="outline">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
-              <select
-                value={responseMode}
-                onChange={(event) => onResponseModeChange(event.target.value as MeetingResponseMode)}
-                disabled={isSending}
-                className={SMALL_SELECT_CLASS_NAME}
-              >
-                {responseModeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+          <div className="mb-3 space-y-3 px-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onMicAction}
+                  disabled={(sttMode === "browser" && !browserSpeechSupported) || (sttMode === "whisper" && !openAiSttSupported) || isSending}
+                >
+                  {sttMode === "browser"
+                    ? isListening
+                      ? copy.meeting.stopMic
+                      : copy.meeting.speakAndRun
+                    : isRecording
+                      ? copy.meeting.stopWhisper
+                      : copy.meeting.whisperAndRun}
+                </Button>
+                <Badge variant="outline">{sttMode === "browser" ? copy.meeting.browserStt : copy.meeting.whisper}</Badge>
+              </div>
+              {showAdvancedControls ? (
+                <Button type="button" variant="outline" size="sm" onClick={onToggleAdvancedControls} disabled={isSending}>
+                  {locale === "ko" ? "간단히 보기" : "Simple view"}
+                </Button>
+              ) : null}
             </div>
-            <div className="text-right text-xs text-mist">
-              <div>{activeResponseModeLabel}</div>
-              <div className="mt-1">{copy.meeting.browserMicHint}</div>
-
-            </div>
+            {showAdvancedControls ? (
+              <div className="grid gap-2 rounded-[20px] border border-ink/10 bg-paper/45 p-3 md:grid-cols-2">
+                <label className="grid gap-1 text-xs text-mist">
+                  <span>{locale === "ko" ? "답변 대상" : "Reply target"}</span>
+                  <select
+                    value={responseMode}
+                    onChange={(event) => onResponseModeChange(event.target.value as MeetingResponseMode)}
+                    disabled={isSending}
+                    className={SMALL_SELECT_CLASS_NAME}
+                  >
+                    {responseModeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs text-mist">
+                  <span>{locale === "ko" ? "응답 모드" : "Response mode"}</span>
+                  <select
+                    value={speedMode}
+                    onChange={(event) => onSpeedModeChange(event.target.value as MeetingSpeedMode)}
+                    disabled={isSending}
+                    className={SMALL_SELECT_CLASS_NAME}
+                  >
+                    {speedModeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="text-xs leading-5 text-mist md:col-span-2">
+                  <div>{activeResponseModeLabel}</div>
+                  <div className="mt-1">{activeSpeedModeLabel}</div>
+                </div>
+              </div>
+            ) : null}
           </div>
           <Textarea
             ref={composerRef}
@@ -1204,57 +1448,16 @@ function MeetingScriptConsolePanel({
   );
 }
 
-function UserCameraDockCard({
-  locale,
-  copy,
-  cameraReady,
-  videoRef,
-  snapshotUpdatedAt
-}: {
-  locale: AppLocale;
-  copy: MeetingCopy;
-  cameraReady: boolean;
-  videoRef: RefObject<HTMLVideoElement>;
-  snapshotUpdatedAt: string;
-}) {
-  const panelCopy = dockPanelCopy(locale);
-
-  return (
-    <div className="rounded-[30px] border border-ink/10 bg-white p-4 shadow-[0_22px_52px_rgba(18,24,36,0.08)]">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className="section-kicker">{panelCopy.userCameraEyebrow}</div>
-          <div className="font-display text-[1.8rem] leading-none text-ink">{panelCopy.userCameraTitle}</div>
-          <p className="text-sm leading-6 text-mist">{panelCopy.userCameraDescription}</p>
-        </div>
-        <Badge variant="outline">{snapshotUpdatedAt}</Badge>
-      </div>
-      <div className="relative overflow-hidden rounded-[26px] border border-ink/10 bg-white">
-        <div className="relative aspect-[16/10]">
-          <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
-          {!cameraReady ? (
-            <div className="absolute inset-0 grid place-items-center bg-white px-5 text-center text-sm text-ink/72">
-              {copy.meeting.cameraFallback}
-            </div>
-          ) : null}
-          <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-            <Badge>{copy.meeting.userLabel}</Badge>
-            <Badge variant="secondary">{copy.meeting.localCam}</Badge>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ParticipantStagePanel({
   copy,
   locale,
   agents,
   agentStatus,
   latestMessages,
+  cameraEnabled,
   cameraReady,
   videoRef,
+  focusMode,
   activeTabLabel,
   snapshotStatusLabel,
   snapshotDetail,
@@ -1269,11 +1472,18 @@ function ParticipantStagePanel({
   openAiSttSupported,
   responseMode,
   responseModeOptions,
+  speedMode,
+  speedModeOptions,
+  showAdvancedControls,
   composerRef,
   onInputChange,
   onComposerKeyDown,
   onMicAction,
   onResponseModeChange,
+  onSpeedModeChange,
+  onToggleAdvancedControls,
+  onToggleFocusMode,
+  onToggleCamera,
   onSend,
   onReset
 }: {
@@ -1282,8 +1492,10 @@ function ParticipantStagePanel({
   agents: ReturnType<typeof getAgents>;
   agentStatus: Record<AgentId, AgentStatus>;
   latestMessages: Record<AgentId, string>;
+  cameraEnabled: boolean;
   cameraReady: boolean;
   videoRef: RefObject<HTMLVideoElement>;
+  focusMode: boolean;
   activeTabLabel: string;
   snapshotStatusLabel: string;
   snapshotDetail: string;
@@ -1298,15 +1510,23 @@ function ParticipantStagePanel({
   openAiSttSupported: boolean;
   responseMode: MeetingResponseMode;
   responseModeOptions: ResponseModeOption[];
+  speedMode: MeetingSpeedMode;
+  speedModeOptions: SpeedModeOption[];
+  showAdvancedControls: boolean;
   composerRef: RefObject<HTMLTextAreaElement>;
   onInputChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicAction: () => void;
   onResponseModeChange: (mode: MeetingResponseMode) => void;
+  onSpeedModeChange: (mode: MeetingSpeedMode) => void;
+  onToggleAdvancedControls: () => void;
+  onToggleFocusMode: () => void;
+  onToggleCamera: () => void;
   onSend: () => void;
   onReset: () => void;
-}) {  return (
-    <Card className="p-4 lg:p-5">
+}) {
+  return (
+    <Card className="flex h-full min-h-0 flex-col p-4 lg:p-5">
       <SectionHeader
         eyebrow={copy.meeting.stageEyebrow}
         title={copy.meeting.stageTitle}
@@ -1315,12 +1535,18 @@ function ParticipantStagePanel({
             <Badge variant="secondary">{copy.meeting.participants(agents.length + 1)}</Badge>
             <Badge variant="outline">{activeTabLabel}</Badge>
             <Badge variant="outline">{snapshotStatusLabel}</Badge>
+            <Button type="button" size="sm" variant="outline" onClick={onToggleCamera} className="h-8 rounded-full">
+              {cameraEnabled ? (locale === "ko" ? "카메라 끄기" : "Hide camera") : locale === "ko" ? "카메라 켜기" : "Show camera"}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={onToggleFocusMode} className="h-8 rounded-full">
+              {focusMode ? (locale === "ko" ? "집중 해제" : "Exit focus") : locale === "ko" ? "집중 모드" : "Focus mode"}
+            </Button>
           </>
         }
         description={snapshotDetail}
       />
-      <div className="grid gap-4">
-        <div className="grid gap-4 xl:grid-cols-2">
+      <div className="mt-4 grid min-h-0 flex-1 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
+        <div className="grid gap-4 xl:grid-cols-2 xl:auto-rows-fr">
           {agents.map((agent) => (
             <BroadcastSpeakerCard
               key={agent.id}
@@ -1331,7 +1557,7 @@ function ParticipantStagePanel({
             />
           ))}
         </div>
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.28fr)_minmax(280px,0.72fr)]">
+        <div className={cn("grid min-h-0 gap-4", cameraEnabled ? "xl:grid-cols-[minmax(0,1.28fr)_minmax(260px,0.72fr)]" : "xl:grid-cols-1")}>
           <MeetingScriptConsolePanel
             copy={copy}
             locale={locale}
@@ -1345,21 +1571,28 @@ function ParticipantStagePanel({
             openAiSttSupported={openAiSttSupported}
             responseMode={responseMode}
             responseModeOptions={responseModeOptions}
+            speedMode={speedMode}
+            speedModeOptions={speedModeOptions}
+            showAdvancedControls={showAdvancedControls}
             composerRef={composerRef}
             onInputChange={onInputChange}
             onComposerKeyDown={onComposerKeyDown}
             onMicAction={onMicAction}
             onResponseModeChange={onResponseModeChange}
+            onSpeedModeChange={onSpeedModeChange}
+            onToggleAdvancedControls={onToggleAdvancedControls}
             onSend={onSend}
             onReset={onReset}
           />
-          <UserCameraDockCard
-            locale={locale}
-            copy={copy}
-            cameraReady={cameraReady}
-            videoRef={videoRef}
-            snapshotUpdatedAt={snapshotUpdatedAt}
-          />
+          {cameraEnabled ? (
+            <UserCameraDockCard
+              locale={locale}
+              copy={copy}
+              cameraReady={cameraReady}
+              videoRef={videoRef}
+              snapshotUpdatedAt={snapshotUpdatedAt}
+            />
+          ) : null}
         </div>
       </div>
     </Card>
@@ -1745,7 +1978,7 @@ function PersonaEditorCard({
           <div className="flex items-center justify-between gap-2">
             <span>{panelCopy.avatarToneLabel}</span>
             <span className="text-[10px] font-medium normal-case tracking-normal text-mist/80">
-              {locale === "ko" ? "\uCE74\uB4DC \uC0C9\uAC10" : "Card mood"}
+              {locale === "ko" ? "카드 색감" : "Card mood"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1807,6 +2040,7 @@ function SessionDockPanel({
 }) {
   const panelCopy = dockPanelCopy(locale);
   const [activePersonaId, setActivePersonaId] = useState<AgentId>(() => agents[0]?.id ?? "assistant");
+  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
 
   useEffect(() => {
     if (!agents.some((agent) => agent.id === activePersonaId)) {
@@ -1818,18 +2052,18 @@ function SessionDockPanel({
   const activePersonaIndex = activePersonaAgent ? agents.findIndex((agent) => agent.id === activePersonaAgent.id) : 0;
   const openClawStatusLabel = !capabilities?.openclawRemote
     ? locale === "ko"
-      ? "\uBBF8\uC124\uC815"
+      ? "미설정"
       : "Not configured"
     : openClawProbe?.status === "reachable"
       ? locale === "ko"
-        ? "\uC5F0\uACB0 \uD655\uC778\uB428"
+        ? "연결 확인됨"
         : "Connected"
       : openClawProbe?.status === "unreachable"
         ? locale === "ko"
-          ? "\uC5F0\uACB0 \uC2E4\uD328"
+          ? "연결 실패"
           : "Connection failed"
         : locale === "ko"
-          ? "\uC124\uC815\uB428"
+          ? "설정됨"
           : "Configured";
   const openClawStatusToneClass = !capabilities?.openclawRemote
     ? "border-ink/10 bg-white text-mist"
@@ -1840,54 +2074,54 @@ function SessionDockPanel({
         : "border-cobalt/20 bg-cobalt/8 text-ink";
   const openClawDescription = !capabilities?.openclawRemote
     ? locale === "ko"
-      ? ".env.local\uC5D0 OPENCLAW_BASE_URL\uACFC \uD544\uC694\uD558\uBA74 OPENCLAW_API_KEY\uB97C \uB123\uC73C\uBA74 \uB429\uB2C8\uB2E4."
+      ? ".env.local에 OPENCLAW_BASE_URL과 필요하면 OPENCLAW_API_KEY를 추가하세요."
       : "Add OPENCLAW_BASE_URL and, if needed, OPENCLAW_API_KEY to .env.local."
     : openClawProbe?.status === "reachable"
       ? locale === "ko"
-        ? "OpenClaw chat \uB610\uB294 health \uC751\uB2F5\uC774 \uD655\uC778\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
+        ? "OpenClaw chat 또는 health 응답을 확인했습니다."
         : "The OpenClaw chat or health endpoint responded successfully."
       : openClawProbe?.status === "unreachable"
         ? locale === "ko"
-          ? "OpenClaw\uAC00 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0\uB9CC \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC8FC\uC18C, \uD1A0\uD070, /chat \uB610\uB294 /health\uB97C \uD655\uC778\uD558\uC138\uC694."
+          ? "OpenClaw가 설정되어 있지만 응답을 받지 못했습니다. 주소, 토큰, /chat 또는 /health를 확인하세요."
           : "OpenClaw is configured, but the app could not get a response. Check the base URL, token, and /chat or /health endpoint."
         : locale === "ko"
-          ? "OpenClaw\uB294 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0\uB9CC \uC544\uC9C1 \uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB97C \uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
+          ? "OpenClaw가 설정되어 있지만 아직 연결 테스트를 하지 않았습니다."
           : "OpenClaw is configured, but the connection has not been tested yet.";
   const openClawProbeDetail = openClawProbe?.message;
   const openClawBaseUrl = openClawProbe?.baseUrl || (capabilities?.openclawRemote
     ? locale === "ko"
-      ? "\uD658\uACBD \uBCC0\uC218\uC5D0 \uC124\uC815\uB428"
+      ? "환경 변수에 설정됨"
       : "Configured in the environment"
     : locale === "ko"
-      ? "OPENCLAW_BASE_URL \uC5C6\uC74C"
+      ? "OPENCLAW_BASE_URL 미설정"
       : "OPENCLAW_BASE_URL not set");
   const openClawPathSummary = openClawProbe
     ? `${openClawProbe.chatPath} / ${openClawProbe.tasksPath}`
     : locale === "ko"
-      ? "/chat, /tasks \uAE30\uBCF8 \uACBD\uB85C"
+      ? "/chat, /tasks 기본 경로"
       : "/chat, /tasks default paths";
   const openClawCheckedLabel = openClawProbe?.checkedAt
     ? new Date(openClawProbe.checkedAt).toLocaleString(copy.app.dateLocale)
     : locale === "ko"
-      ? "\uC544\uC9C1 \uD655\uC778 \uC804"
+      ? "아직 테스트 안 함"
       : "Not tested yet";
   const openClawMeetingLabel = capabilities?.openclawChat
     ? locale === "ko"
-      ? "\uD68C\uC758 \uAC00\uB2A5"
+      ? "회의 사용 가능"
       : "Meeting ready"
     : locale === "ko"
-      ? "\uD68C\uC758 \uAEBC\uC9D0"
+      ? "회의 꺼짐"
       : "Meeting off";
   const openClawResearchLabel = capabilities?.openclawRemote
     ? locale === "ko"
-      ? "\uC870\uC0AC \uAC00\uB2A5"
+      ? "조사 사용 가능"
       : "Research ready"
     : locale === "ko"
-      ? "\uC870\uC0AC \uAEBC\uC9D0"
+      ? "조사 꺼짐"
       : "Research off";
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-col gap-4">
       <div className="rounded-[24px] border border-ink/10 bg-white p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
@@ -1918,33 +2152,54 @@ function SessionDockPanel({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mist">
-                {locale === "ko" ? "OpenClaw \uC5F0\uACB0" : "OpenClaw Connection"}
+                {locale === "ko" ? "OpenClaw 연결" : "OpenClaw Connection"}
               </div>
               <div className="text-sm font-semibold text-ink">{openClawStatusLabel}</div>
-              <p className="max-w-[30rem] text-sm leading-6 text-mist">{openClawDescription}</p>
+              <p className="max-w-[30rem] text-sm leading-6 text-mist">
+                {showConnectionDetails
+                  ? openClawDescription
+                  : locale === "ko"
+                    ? "먼저 연결 상태를 확인하고 테스트해 보세요."
+                    : "Start with the connection status and test it first."}
+              </p>
             </div>
             <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold", openClawStatusToneClass)}>
               {openClawStatusLabel}
             </span>
           </div>
-          {openClawProbeDetail ? <div className="mt-3 text-xs leading-5 text-mist">{openClawProbeDetail}</div> : null}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="outline">{openClawMeetingLabel}</Badge>
-            <Badge variant="outline">{openClawResearchLabel}</Badge>
-          </div>
-          <div className="mt-3 rounded-[16px] border border-ink/10 bg-white px-3 py-3">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mist">Base URL</div>
-            <div className="mt-1 break-all text-sm text-ink/78">{openClawBaseUrl}</div>
-            <div className="mt-1 text-xs text-mist">{openClawPathSummary}</div>
-          </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-mist">
-              {locale === "ko" ? `\uB9C8\uC9C0\uB9C9 \uD655\uC778 ${openClawCheckedLabel}` : `Last checked ${openClawCheckedLabel}`}
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">{openClawMeetingLabel}</Badge>
+              <Badge variant="outline">{openClawResearchLabel}</Badge>
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={onTestOpenClaw} disabled={isTestingOpenClaw}>
-              {isTestingOpenClaw ? (locale === "ko" ? "\uD14C\uC2A4\uD2B8 \uC911..." : "Testing...") : locale === "ko" ? "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8" : "Test connection"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowConnectionDetails((previous) => !previous)}>
+                {showConnectionDetails
+                  ? locale === "ko"
+                    ? "요약만 보기"
+                    : "Show summary"
+                  : locale === "ko"
+                    ? "세부 정보"
+                    : "Details"}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={onTestOpenClaw} disabled={isTestingOpenClaw}>
+                {isTestingOpenClaw ? (locale === "ko" ? "테스트 중..." : "Testing...") : locale === "ko" ? "연결 테스트" : "Test connection"}
+              </Button>
+            </div>
           </div>
+          {showConnectionDetails ? (
+            <>
+              {openClawProbeDetail ? <div className="mt-3 text-xs leading-5 text-mist">{openClawProbeDetail}</div> : null}
+              <div className="mt-3 rounded-[16px] border border-ink/10 bg-white px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mist">Base URL</div>
+                <div className="mt-1 break-all text-sm text-ink/78">{openClawBaseUrl}</div>
+                <div className="mt-1 text-xs text-mist">{openClawPathSummary}</div>
+              </div>
+              <div className="mt-3 text-xs text-mist">
+                {locale === "ko" ? `마지막 확인 ${openClawCheckedLabel}` : `Last checked ${openClawCheckedLabel}`}
+              </div>
+            </>
+          ) : null}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex flex-wrap gap-2 rounded-full border border-ink/10 bg-white/82 p-1">
@@ -2000,7 +2255,7 @@ function MinutesDockPanel({
   const panelCopy = dockPanelCopy(locale);
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="rounded-[24px] border border-ink/10 bg-white p-4">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="space-y-1">
@@ -2041,9 +2296,9 @@ function MinutesDockPanel({
         </div>
       </div>
 
-      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
+      <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-ink/10 bg-white p-4">
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.minutesHistory}</div>
-        <ScrollArea className="meeting-column-scroll h-[300px] pr-1">
+        <ScrollArea className="meeting-column-scroll min-h-0 flex-1 pr-1">
           <div className="space-y-2">
             {minutesHistory.map((record) => (
               <button
@@ -2085,7 +2340,7 @@ function ResearchDockPanel({
   const screenshotUrl = selectedArtifacts?.screenshot || selectedTask?.screenshot;
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="rounded-[24px] border border-ink/10 bg-white p-4 text-ink">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="space-y-1">
@@ -2116,12 +2371,12 @@ function ResearchDockPanel({
         ) : null}
       </div>
 
-      <div className="min-h-0 rounded-[24px] border border-ink/10 bg-white p-4">
+      <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-ink/10 bg-white p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-mist">{panelCopy.researchHistory}</div>
           <Badge variant="outline">{completedTaskCount}</Badge>
         </div>
-        <ScrollArea className="meeting-column-scroll h-[300px] pr-1">
+        <ScrollArea className="meeting-column-scroll min-h-0 flex-1 pr-1">
           <div className="space-y-2">
             {taskHistory.length > 0 ? (
               taskHistory.map((task) => (
@@ -2219,7 +2474,7 @@ function MeetingDebuggerDock({
 
   if (!open) {
     return (
-      <Card className="flex min-h-0 flex-col overflow-hidden border border-ink/12 bg-white p-2 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)]">
+      <Card className="flex min-h-0 flex-col self-stretch overflow-hidden border border-ink/12 bg-white p-2 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:h-[calc(100dvh-14rem)]">
         <Button type="button" size="sm" variant="outline" onClick={onToggle} className="h-11 w-full rounded-[16px] border-ink/12 bg-white text-ink hover:bg-ink/5">
           {panelCopy.openDock}
         </Button>
@@ -2248,7 +2503,7 @@ function MeetingDebuggerDock({
   }
 
   return (
-    <Card className="flex min-h-0 flex-col self-start overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:max-h-[calc(100dvh-14rem)]">
+    <Card className="flex min-h-0 flex-col self-stretch overflow-hidden border border-ink/12 bg-white p-0 text-ink shadow-[0_18px_42px_rgba(18,24,36,0.08)] xl:h-[calc(100dvh-14rem)]">
       <div className="flex items-center justify-between border-b border-ink/8 px-3 py-3">
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {(Object.keys(panelCopy.dockTabs) as DockTab[]).map((tab) => (
@@ -2272,7 +2527,7 @@ function MeetingDebuggerDock({
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden p-3">
+      <div className="min-h-0 flex-1 overflow-auto p-3">
         {activeTab === "session" ? (
           <SessionDockPanel
             copy={copy}
@@ -2336,17 +2591,21 @@ export function MeetingRoom({
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [personaOverrides, setPersonaOverrides] = useState<AgentPersonaOverrides>(() => buildPersonaState(locale));
   const [dockOpen, setDockOpen] = useState(false);
+  const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
   const [activeDockTab, setActiveDockTab] = useState<DockTab>("session");
+  const [focusMode, setFocusMode] = useState(false);
+  const [showAdvancedComposerControls, setShowAdvancedComposerControls] = useState(false);
   const [sttMode, setSttMode] = useState<SpeechMode>("browser");
   const [ttsMode, setTtsMode] = useState<TtsMode>("browser");
   const [autoSpeakMode, setAutoSpeakMode] = useState<AutoSpeakMode>("off");
   const [responseMode, setResponseMode] = useState<MeetingResponseMode>("auto");
+  const [speedMode, setSpeedMode] = useState<MeetingSpeedMode>("fast");
   const [isListening, setIsListening] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [browserSpeechSupported, setBrowserSpeechSupported] = useState(false);
   const [browserTtsSupported, setBrowserTtsSupported] = useState(false);
-  const [notice, setNotice] = useState<string>(copy.meeting.initialNotice);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [openClawProbe, setOpenClawProbe] = useState<OpenClawConnectionProbe | null>(null);
   const [isTestingOpenClaw, setIsTestingOpenClaw] = useState(false);
@@ -2386,12 +2645,22 @@ export function MeetingRoom({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const personaHydratedRef = useRef(false);
 
+  function stopCameraPreview() {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  }
+
   const agents = useMemo(() => getAgents(locale, personaOverrides), [locale, personaOverrides]);
   const agentsById = useMemo(() => getAgentsById(locale, personaOverrides), [locale, personaOverrides]);
   const responseModeOptions = useMemo(
     () => getResponseModeOptions(locale, agentsById.assistant.name, agentsById.analyst.name),
     [agentsById.assistant.name, agentsById.analyst.name, locale]
   );
+  const speedModeOptions = useMemo(() => getSpeedModeOptions(locale), [locale]);
 
   const selectedSnapshot = useMemo(() => {
     if (activeTab === "btc") return btcSnapshot;
@@ -2440,7 +2709,7 @@ export function MeetingRoom({
     browserTtsSupported ? copy.meeting.browserTts : null,
     capabilities?.elevenLabsTts ? copy.meeting.elevenLabs : null,
     copy.meeting.openClawResearch,
-    capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw \uD68C\uC758" : "OpenClaw Meeting") : null
+    capabilities?.openclawChat ? (locale === "ko" ? "OpenClaw 회의" : "OpenClaw Meeting") : null
   ].filter(Boolean) as string[];
   useEffect(() => {
     const recognitionSource = (window as Window & {
@@ -2488,13 +2757,20 @@ export function MeetingRoom({
 
   useEffect(() => {
     let mounted = true;
-    async function startCamera() {
+
+    async function syncCamera() {
+      if (!cameraEnabled) {
+        stopCameraPreview();
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         if (!mounted) {
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
+        stopCameraPreview();
         cameraStreamRef.current = stream;
         setCameraReady(true);
         if (videoRef.current) {
@@ -2506,10 +2782,15 @@ export function MeetingRoom({
       }
     }
 
-    startCamera();
+    void syncCamera();
     return () => {
       mounted = false;
-      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      stopCameraPreview();
+    };
+  }, [cameraEnabled]);
+
+  useEffect(() => {
+    return () => {
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       recognitionRef.current?.stop?.();
       mediaRecorderRef.current?.stop?.();
@@ -2558,10 +2839,10 @@ export function MeetingRoom({
             : "OpenClaw connection verified."
           : data.status === "unconfigured"
             ? locale === "ko"
-              ? "OpenClaw가 아직 설정되지 않았습니다. .env.local에 주소와 토큰을 추가해 주세요."
+              ? "OpenClaw가 아직 설정되지 않았습니다. .env.local에 연결 정보를 먼저 입력하세요."
               : "OpenClaw is not configured yet. Add it to .env.local."
             : locale === "ko"
-              ? "OpenClaw 연결 테스트에 실패했습니다. base URL, 토큰, /chat 또는 /health 응답을 확인해 주세요."
+              ? "OpenClaw 연결 테스트가 실패했습니다. base URL, 토큰, /chat 또는 /health 응답을 확인하세요."
               : "OpenClaw connection test failed. Check the base URL, token, and /chat or /health response."
       );
     } catch (error) {
@@ -2578,17 +2859,13 @@ export function MeetingRoom({
           message
         })
       );
-      setNotice(
-        locale === "ko"
-          ? "OpenClaw 연결 테스트 호출에 실패했습니다."
-          : "Failed to call the OpenClaw connection test."
-      );
+      setNotice(locale === "ko" ? "OpenClaw 연결 테스트를 호출하지 못했습니다." : "Failed to call the OpenClaw connection test.");
     } finally {
       setIsTestingOpenClaw(false);
     }
   }
 
-  async function refreshBtc() {
+async function refreshBtc() {
     const data = await fetchJson<MarketSnapshot>("/api/markets/btc");
     startTransition(() => setBtcSnapshot(data));
   }
@@ -2991,45 +3268,170 @@ export function MeetingRoom({
     setInput("");
     setAgentStatus(getPendingAgentStatus(responseMode));
     const baseTimeline = [...timeline];
-    const userItem = createTimelineItem({ ts: new Date().toISOString(), kind: "message", speakerType: "user", speakerLabel: copy.meeting.userLabel, badge: activeTab, text: message });
-    setTimeline((previous) => [...previous, userItem]);
+    const userItem = createTimelineItem({
+      ts: new Date().toISOString(),
+      kind: "message",
+      speakerType: "user",
+      speakerLabel: copy.meeting.userLabel,
+      badge: activeTab,
+      text: message
+    });
+    let nextTimeline = [...baseTimeline, userItem];
+    setTimeline(nextTimeline);
+
+    const requestPayload: MeetingRoundRequest = {
+      message,
+      history: extractHistory(nextTimeline),
+      activeTab,
+      marketSnapshot: activeTab === "btc" ? btcSnapshot : activeTab === "us" ? usSnapshot : krSnapshot,
+      portfolioSnapshot: portfolio,
+      minutes: minutes ? { ...minutes, sessionId } : null,
+      locale,
+      personaOverrides,
+      responseMode,
+      speedMode
+    };
+
+    const commitTimeline = () => {
+      const snapshot = [...nextTimeline];
+      setTimeline(snapshot);
+      return snapshot;
+    };
+
+    const upsertAgentItem = (args: {
+      id: string;
+      ts: string;
+      agentId: AgentId;
+      speakerLabel: string;
+      badge: string;
+      text: string;
+      provider?: Provider;
+    }) => {
+      const nextItem = createTimelineItem({
+        id: args.id,
+        ts: args.ts,
+        kind: "message",
+        speakerType: "agent",
+        agentId: args.agentId,
+        speakerLabel: args.speakerLabel,
+        badge: args.badge,
+        text: args.text,
+        provider: args.provider
+      });
+      const index = nextTimeline.findIndex((entry) => entry.id === args.id);
+      if (index === -1) {
+        nextTimeline = [...nextTimeline, nextItem];
+      } else {
+        nextTimeline = [
+          ...nextTimeline.slice(0, index),
+          {
+            ...nextTimeline[index],
+            ...nextItem
+          },
+          ...nextTimeline.slice(index + 1)
+        ];
+      }
+      commitTimeline();
+    };
 
     try {
-      const data = await fetchJson<MeetingRoundResponse>("/api/meeting/round", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message,
-          history: extractHistory([...baseTimeline, userItem]),
-          activeTab,
-          marketSnapshot: activeTab === "btc" ? btcSnapshot : activeTab === "us" ? usSnapshot : krSnapshot,
-          portfolioSnapshot: portfolio,
-          minutes: minutes ? { ...minutes, sessionId } : null,
-          locale,
-          personaOverrides,
-          responseMode
-        })
+      const data = await fetchMeetingRoundStream(requestPayload, async (event) => {
+        switch (event.type) {
+          case "start": {
+            const speakerName = agentsById[event.firstSpeakerId].name;
+            setNotice(
+              locale === "ko"
+                ? `${speakerName}이 답변을 준비 중입니다.`
+                : `${speakerName} is preparing a reply.`
+            );
+            break;
+          }
+          case "turn_start": {
+            setOnlyStatus(event.agentId, "thinking");
+            upsertAgentItem({
+              id: event.turnId,
+              ts: event.ts,
+              agentId: event.agentId,
+              speakerLabel: event.speakerLabel,
+              badge: event.phase,
+              text: "...",
+              provider: event.provider
+            });
+            break;
+          }
+          case "turn_partial": {
+            setOnlyStatus(event.agentId, "thinking");
+            upsertAgentItem({
+              id: event.turnId,
+              ts: event.ts,
+              agentId: event.agentId,
+              speakerLabel: agentsById[event.agentId].name,
+              badge: event.phase,
+              text: event.text || "...",
+              provider: event.provider
+            });
+            break;
+          }
+          case "turn_complete": {
+            upsertAgentItem({
+              id: event.turn.id,
+              ts: event.turn.timestamp,
+              agentId: event.turn.agentId,
+              speakerLabel: event.turn.speakerLabel,
+              badge: event.turn.phase,
+              text: event.turn.text,
+              provider: event.turn.provider
+            });
+            break;
+          }
+          case "research_start": {
+            setNotice(
+              locale === "ko"
+                ? "OpenClaw가 추가 조사를 시작했습니다."
+                : "OpenClaw started a follow-up research task."
+            );
+            break;
+          }
+          case "research_complete": {
+            upsertTask(event.research.task);
+            setTaskArtifacts((previous) => ({ ...previous, [event.research.task.taskId]: event.research.artifacts }));
+            setActiveDockTab("research");
+            setDockOpen(true);
+            break;
+          }
+          default:
+            break;
+        }
       });
+
       if (data.research) {
-        upsertTask(data.research.task);
-        setTaskArtifacts((previous) => ({ ...previous, [data.research!.task.taskId]: data.research!.artifacts }));
+        const research = data.research;
+        upsertTask(research.task);
+        setTaskArtifacts((previous) => ({ ...previous, [research.task.taskId]: research.artifacts }));
         setActiveDockTab("research");
         setDockOpen(true);
       }
-      const turnItems = data.turns.map((turn) => createTimelineItem({ ts: turn.timestamp, kind: "message", speakerType: "agent", agentId: turn.agentId, speakerLabel: turn.speakerLabel, badge: turn.phase, text: turn.text, provider: turn.provider }));
-      for (const item of turnItems) {
-        setTimeline((previous) => [...previous, item]);
-        setOnlyStatus(item.agentId as AgentId, "thinking");
-        await new Promise((resolve) => window.setTimeout(resolve, 120));
+
+      for (const turn of data.turns) {
+        upsertAgentItem({
+          id: turn.id,
+          ts: turn.timestamp,
+          agentId: turn.agentId,
+          speakerLabel: turn.speakerLabel,
+          badge: turn.phase,
+          text: turn.text,
+          provider: turn.provider
+        });
       }
+
       setAgentStatus({ assistant: "idle", analyst: "idle" });
-      const nextTimeline = [...baseTimeline, userItem, ...turnItems];
-      persistMeeting(data.minutes, nextTimeline, message);
+      const finalizedTimeline = commitTimeline();
+      persistMeeting(data.minutes, finalizedTimeline, message);
       const usedFallbackMeetingProvider = capabilities?.openclawChat && data.provider !== "openclaw";
       setNotice(
         usedFallbackMeetingProvider
           ? locale === "ko"
-            ? `${agentsById[data.meta.finalSpeakerId].name}이 답변했습니다. OpenClaw 회의를 사용할 수 없어 ${data.provider}로 대신 응답했습니다.`
+            ? `${agentsById[data.meta.finalSpeakerId].name}이 답변했습니다. OpenClaw 회의가 불가해 ${data.provider}로 대신 응답했습니다.`
             : `${agentsById[data.meta.finalSpeakerId].name} replied. OpenClaw meeting was unavailable, so ${data.provider} was used instead.`
           : data.meta.usedResearch
             ? locale === "ko"
@@ -3046,12 +3448,19 @@ export function MeetingRoom({
         Boolean(capabilities?.openclawRemote) &&
         /(openclaw|\/chat|\/tasks|health|connection|fetch failed|econnrefused|401|403|404|token)/i.test(errorText);
 
-      pushTimeline({ ts: new Date().toISOString(), kind: "message", speakerType: "system", speakerLabel: copy.meeting.systemLabel, badge: "error", text: errorText });
+      pushTimeline({
+        ts: new Date().toISOString(),
+        kind: "message",
+        speakerType: "system",
+        speakerLabel: copy.meeting.systemLabel,
+        badge: "error",
+        text: errorText
+      });
       setAgentStatus({ assistant: "idle", analyst: "idle" });
       setNotice(
         likelyOpenClawError
           ? locale === "ko"
-            ? "회의 답변 생성에 실패했습니다. OpenClaw base URL, 토큰, /chat 연결 상태를 확인해 주세요."
+            ? "회의 응답 생성에 실패했습니다. OpenClaw base URL, 토큰, /chat 연결 상태를 확인해 주세요."
             : "Failed to generate the meeting reply. Check the OpenClaw base URL, token, and /chat connectivity."
           : copy.meeting.notices.meetingFailed
       );
@@ -3060,7 +3469,6 @@ export function MeetingRoom({
       window.setTimeout(() => composerRef.current?.focus(), 0);
     }
   }
-
   async function handleTradeSubmit() {
     if (isPlacingOrder) {
       return;
@@ -3132,14 +3540,18 @@ export function MeetingRoom({
       <div className="dashboard-shell mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1860px] flex-col gap-3 rounded-[34px] border border-white/50 bg-white/35 p-3 shadow-glow backdrop-blur-xl">
         <header className="panel-surface rounded-[30px] px-5 py-5">
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Badge>{copy.meeting.headerBadge}</Badge>
               <Badge variant="signal">{experienceCopy.marketHubEyebrow}</Badge>
               <Badge variant="outline">{copy.meeting.tabBadge(activeTabLabel)}</Badge>
+              {focusMode ? <Badge variant="outline">{locale === "ko" ? "집중 모드" : "Focus mode"}</Badge> : null}
             </div>
             <div className="space-y-3">
               <h1 className="max-w-4xl font-display text-3xl font-semibold md:text-[2.8rem]">{meetingShellTitle}</h1>
-              <p className="max-w-4xl text-sm leading-6 text-mist">{notice}</p>
+              <div className="inline-flex max-w-4xl items-start gap-2 rounded-full border border-ink/10 bg-white px-3 py-2 text-xs text-mist shadow-[0_10px_24px_rgba(18,24,36,0.04)]">
+                <span className={cn("mt-1 h-2 w-2 rounded-full", isSending ? "bg-amber-400 animate-pulse" : "bg-mint")} />
+                <span className="leading-5">{notice}</span>
+              </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <OverviewMetric
@@ -3166,13 +3578,15 @@ export function MeetingRoom({
 
         <div
           className={cn(
-            "grid flex-1 gap-3 xl:items-start",
-            dockOpen
-              ? "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_minmax(320px,360px)]"
-              : "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_112px]"
+            "grid min-h-0 flex-1 gap-3 xl:items-stretch",
+            focusMode
+              ? "xl:grid-cols-1"
+              : dockOpen
+                ? "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_minmax(320px,360px)]"
+                : "xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)_112px]"
           )}
         >
-          <Card className="flex min-h-0 min-w-0 flex-col self-start p-4 lg:p-5 xl:max-h-[calc(100dvh-14rem)]">
+          <Card className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden p-4 lg:p-5 xl:h-[calc(100dvh-14rem)]", focusMode && "hidden")}>
             <SectionHeader
               eyebrow={copy.meeting.workspaceEyebrow}
               title={copy.meeting.workspaceTitle}
@@ -3368,34 +3782,34 @@ export function MeetingRoom({
                     </div>
                   </div>
                 ) : null}
-                            <div className="rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
-                <div className="mb-3 space-y-1">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
-
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {availableFeatureLabels.map((label) => (
-                    <span
-                      key={label}
-                      className="rounded-full border border-ink/10 bg-white px-3 py-1.5 text-xs font-medium text-ink/80"
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </div>              </div>
+              </div>
             </ScrollArea>
+            <div className="mt-4 rounded-[22px] border border-ink/10 bg-white/60 p-4 text-sm text-mist">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-mist">{locale === "ko" ? "기능" : "Capabilities"}</div>
+              <div className="flex flex-wrap gap-2">
+                {availableFeatureLabels.map((label) => (
+                  <span
+                    key={label}
+                    className="rounded-full border border-ink/10 bg-white px-3 py-1.5 text-xs font-medium text-ink/80"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
           </Card>
 
-          <div className="flex min-h-0 min-w-0 flex-col gap-3 self-start">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-[calc(100dvh-14rem)]">
             <ParticipantStagePanel
               copy={copy}
               locale={locale}
               agents={agents}
               agentStatus={agentStatus}
               latestMessages={latestMessages}
+              cameraEnabled={cameraEnabled}
               cameraReady={cameraReady}
               videoRef={videoRef}
+              focusMode={focusMode}
               activeTabLabel={activeTabLabel}
               snapshotStatusLabel={selectedSnapshotStatusLabel}
               snapshotDetail={selectedSnapshotDetail}
@@ -3405,6 +3819,9 @@ export function MeetingRoom({
               isSending={isSending}
               sttMode={sttMode}
               responseMode={responseMode}
+              speedMode={speedMode}
+              speedModeOptions={speedModeOptions}
+              showAdvancedControls={showAdvancedComposerControls}
               responseModeOptions={responseModeOptions}
               isListening={isListening}
               isRecording={isRecording}
@@ -3414,13 +3831,18 @@ export function MeetingRoom({
               onInputChange={setInput}
               onComposerKeyDown={handleComposerKeyDown}
               onMicAction={handleMicAction}
+              onSpeedModeChange={setSpeedMode}
+              onToggleAdvancedControls={() => setShowAdvancedComposerControls((previous) => !previous)}
+              onToggleFocusMode={() => setFocusMode((previous) => !previous)}
+              onToggleCamera={() => setCameraEnabled((previous) => !previous)}
               onResponseModeChange={setResponseMode}
               onSend={() => void handleSend()}
               onReset={resetMeeting}
             />
           </div>
 
-          <MeetingDebuggerDock
+          <div className={cn(focusMode && "hidden")}>
+            <MeetingDebuggerDock
             copy={copy}
             locale={locale}
             open={dockOpen}
@@ -3451,6 +3873,7 @@ export function MeetingRoom({
             onLocaleChange={handleLocaleChange}
             onTestOpenClaw={() => void testOpenClawConnection()}
           />
+          </div>
         </div>
       </div>
     </div>

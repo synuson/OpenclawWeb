@@ -31,6 +31,7 @@ export type OpenClawMeetingChatArgs = {
   history: ChatHistoryItem[];
   locale?: AppLocale;
   mode?: "meeting";
+  maxTokens?: number;
 };
 
 export type OpenClawMeetingChatResult = {
@@ -41,6 +42,13 @@ export type OpenClawMeetingChatResult = {
     title?: string;
     url?: string;
   }>;
+  resolvedPath?: string;
+  elapsedMs?: number;
+  streamed?: boolean;
+};
+
+type StreamOpenClawMeetingChatOptions = {
+  onPartialText?: (text: string) => void | Promise<void>;
 };
 
 type RemoteTaskPayload = {
@@ -119,6 +127,7 @@ const OPENCLAW_CHAT_COMPLETIONS_PATH = normalizePath(process.env.OPENCLAW_CHAT_C
 const OPENCLAW_RESPONSES_PATH = normalizePath(process.env.OPENCLAW_RESPONSES_PATH || "/v1/responses");
 const OPENCLAW_TASKS_PATH = normalizePath(process.env.OPENCLAW_TASKS_PATH || "/tasks");
 const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL || process.env.OPENAI_MODEL || "openai-codex/gpt-5.3-codex";
+const OPENCLAW_MEETING_MAX_TOKENS = Number(process.env.OPENCLAW_MEETING_MAX_TOKENS || 260);
 const OPENCLAW_MAX_TOKENS = Number(process.env.OPENCLAW_MAX_TOKENS || 420);
 const OPENCLAW_TASK_DETAIL_PATH = normalizePath(process.env.OPENCLAW_TASK_DETAIL_PATH || "/tasks/:id");
 const OPENCLAW_TASK_ARTIFACTS_PATH = normalizePath(
@@ -189,6 +198,7 @@ const OPENCLAW_COPY = {
 declare global {
   var __openclawMeetingTasks__: Map<string, MeetingTask> | undefined;
   var __openclawMeetingArtifacts__: Map<string, MeetingTaskArtifacts> | undefined;
+  var __openclawResolvedMeetingChatPath__: string | undefined;
 }
 
 function normalizePath(value: string) {
@@ -570,6 +580,41 @@ function shouldFallbackToResponses(error: unknown) {
   return statusCode === 404 || statusCode === 405 || statusCode === 501;
 }
 
+function getResolvedMeetingChatPath() {
+  return global.__openclawResolvedMeetingChatPath__;
+}
+
+function rememberResolvedMeetingChatPath(path: string) {
+  global.__openclawResolvedMeetingChatPath__ = path;
+}
+
+function getChatPathKind(path: string) {
+  if (path === OPENCLAW_CHAT_COMPLETIONS_PATH) {
+    return "chatCompletions" as const;
+  }
+  if (path === OPENCLAW_RESPONSES_PATH) {
+    return "responses" as const;
+  }
+  return "chat" as const;
+}
+
+function getMeetingChatCandidatePaths(preferStreaming = false) {
+  const base = preferStreaming
+    ? [OPENCLAW_CHAT_COMPLETIONS_PATH, OPENCLAW_CHAT_PATH, OPENCLAW_RESPONSES_PATH]
+    : [OPENCLAW_CHAT_PATH, OPENCLAW_CHAT_COMPLETIONS_PATH, OPENCLAW_RESPONSES_PATH];
+  const cached = getResolvedMeetingChatPath();
+
+  if (!cached) {
+    return [...new Set(base)];
+  }
+
+  return [cached, ...base.filter((path) => path !== cached)];
+}
+
+function getMeetingMaxTokens(args: OpenClawMeetingChatArgs) {
+  return args.maxTokens ?? OPENCLAW_MEETING_MAX_TOKENS;
+}
+
 async function requestRemoteRaw(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
 
@@ -704,6 +749,168 @@ function normalizeChatCompletionsResult(payload: RemoteChatCompletionsPayload): 
   };
 }
 
+async function requestChatEndpoint(path: string, args: OpenClawMeetingChatArgs) {
+  const payload = await requestRemote<RemoteChatPayload>(path, {
+    method: "POST",
+    body: JSON.stringify({
+      agentId: args.agentId,
+      phase: args.phase,
+      systemPrompt: args.systemPrompt,
+      message: args.message,
+      history: args.history,
+      locale: args.locale ?? DEFAULT_LOCALE,
+      mode: args.mode || "meeting"
+    })
+  });
+
+  return normalizeChatResult(payload);
+}
+
+async function requestChatCompletionsEndpoint(path: string, args: OpenClawMeetingChatArgs) {
+  const payload = await requestRemote<RemoteChatCompletionsPayload>(path, {
+    method: "POST",
+    body: JSON.stringify({
+      model: OPENCLAW_MODEL,
+      messages: toChatCompletionsMessages(args),
+      temperature: 0.2,
+      max_tokens: getMeetingMaxTokens(args)
+    })
+  });
+
+  return normalizeChatCompletionsResult(payload);
+}
+
+async function requestResponsesEndpoint(path: string, args: OpenClawMeetingChatArgs) {
+  const payload = await requestRemote<RemoteResponsesPayload>(path, {
+    method: "POST",
+    body: JSON.stringify({
+      model: OPENCLAW_MODEL,
+      input: toResponsesInput(args),
+      temperature: 0.2,
+      max_output_tokens: getMeetingMaxTokens(args)
+    })
+  });
+
+  return normalizeResponsesResult(payload);
+}
+
+async function emitPartialText(
+  onPartialText: StreamOpenClawMeetingChatOptions["onPartialText"],
+  text: string,
+  lastTextRef: { value: string }
+) {
+  if (!onPartialText || !text || text === lastTextRef.value) {
+    return;
+  }
+
+  lastTextRef.value = text;
+  await onPartialText(text);
+}
+
+async function requestChatCompletionsStream(
+  path: string,
+  args: OpenClawMeetingChatArgs,
+  options: StreamOpenClawMeetingChatOptions = {}
+) {
+  const response = await requestRemoteRaw(path, {
+    method: "POST",
+    body: JSON.stringify({
+      model: OPENCLAW_MODEL,
+      messages: toChatCompletionsMessages(args),
+      temperature: 0.2,
+      max_tokens: getMeetingMaxTokens(args),
+      stream: true
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw createOpenClawRequestError(response.status, text);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/event-stream") || !response.body) {
+    const raw = await response.text().catch(() => "");
+    const payload = (raw ? JSON.parse(raw) : {}) as RemoteChatCompletionsPayload;
+    const result = normalizeChatCompletionsResult(payload);
+    if (options.onPartialText) {
+      await options.onPartialText(result.text);
+    }
+    return result;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const partialRef = { value: "" };
+  let buffer = "";
+  let output = "";
+  let model = OPENCLAW_MODEL;
+
+  const flush = async (rawEvent: string) => {
+    const dataLines = rawEvent
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .filter(Boolean);
+
+    for (const entry of dataLines) {
+      if (entry === "[DONE]") {
+        continue;
+      }
+
+      const payload = JSON.parse(entry) as RemoteChatCompletionsPayload & {
+        choices?: Array<{
+          delta?: {
+            content?: string;
+          };
+        }>;
+      };
+      model = payload.model || model;
+      const delta = payload.choices?.[0]?.delta?.content || "";
+      if (!delta) {
+        continue;
+      }
+      output += delta;
+      await emitPartialText(options.onPartialText, output, partialRef);
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const rawEvent = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary + 2);
+      if (rawEvent) {
+        await flush(rawEvent);
+      }
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    await flush(buffer.trim());
+  }
+
+  const text = output.trim();
+  if (!text) {
+    throw new Error("OpenClaw chat completions stream returned an empty response.");
+  }
+
+  return {
+    text,
+    provider: "openclaw",
+    model,
+    streamed: true
+  } satisfies OpenClawMeetingChatResult;
+}
+
 export function isOpenClawRemoteConfigured() {
   return Boolean(OPENCLAW_BASE_URL);
 }
@@ -712,63 +919,87 @@ export function isOpenClawChatConfigured() {
   return Boolean(OPENCLAW_BASE_URL);
 }
 
+export function getOpenClawResolvedMeetingChatPath() {
+  return getResolvedMeetingChatPath();
+}
+
 export async function callOpenClawMeetingChat(args: OpenClawMeetingChatArgs): Promise<OpenClawMeetingChatResult> {
   if (!OPENCLAW_BASE_URL) {
     throw new Error("OPENCLAW_BASE_URL is not set.");
   }
 
-  try {
-    const payload = await requestRemote<RemoteChatPayload>(OPENCLAW_CHAT_PATH, {
-      method: "POST",
-      body: JSON.stringify({
-        agentId: args.agentId,
-        phase: args.phase,
-        systemPrompt: args.systemPrompt,
-        message: args.message,
-        history: args.history,
-        locale: args.locale ?? DEFAULT_LOCALE,
-        mode: args.mode || "meeting"
-      })
-    });
+  const startedAt = Date.now();
+  let lastError: unknown;
 
-    return normalizeChatResult(payload);
-  } catch (error) {
-    if (!shouldFallbackToResponses(error)) {
-      throw error;
+  for (const path of getMeetingChatCandidatePaths()) {
+    try {
+      const kind = getChatPathKind(path);
+      const result =
+        kind === "chat"
+          ? await requestChatEndpoint(path, args)
+          : kind === "chatCompletions"
+            ? await requestChatCompletionsEndpoint(path, args)
+            : await requestResponsesEndpoint(path, args);
+
+      rememberResolvedMeetingChatPath(path);
+      return {
+        ...result,
+        resolvedPath: path,
+        elapsedMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      lastError = error;
+      if (!shouldFallbackToResponses(error)) {
+        throw error;
+      }
     }
   }
 
-  try {
-    const payload = await requestRemote<RemoteChatCompletionsPayload>(OPENCLAW_CHAT_COMPLETIONS_PATH, {
-      method: "POST",
-      body: JSON.stringify({
-        model: OPENCLAW_MODEL,
-        messages: toChatCompletionsMessages(args),
-        temperature: 0.4,
-        max_tokens: OPENCLAW_MAX_TOKENS
-      })
-    });
-
-    return normalizeChatCompletionsResult(payload);
-  } catch (error) {
-    if (!shouldFallbackToResponses(error)) {
-      throw error;
-    }
-  }
-
-  const payload = await requestRemote<RemoteResponsesPayload>(OPENCLAW_RESPONSES_PATH, {
-    method: "POST",
-    body: JSON.stringify({
-      model: OPENCLAW_MODEL,
-      input: toResponsesInput(args),
-      temperature: 0.4,
-      max_output_tokens: OPENCLAW_MAX_TOKENS
-    })
-  });
-
-  return normalizeResponsesResult(payload);
+  throw (lastError as Error) ?? new Error("OpenClaw meeting chat failed.");
 }
 
+export async function streamOpenClawMeetingChat(
+  args: OpenClawMeetingChatArgs,
+  options: StreamOpenClawMeetingChatOptions = {}
+): Promise<OpenClawMeetingChatResult> {
+  if (!OPENCLAW_BASE_URL) {
+    throw new Error("OPENCLAW_BASE_URL is not set.");
+  }
+
+  const startedAt = Date.now();
+  let lastError: unknown;
+
+  for (const path of getMeetingChatCandidatePaths(true)) {
+    if (getChatPathKind(path) !== "chatCompletions") {
+      continue;
+    }
+
+    try {
+      const result = await requestChatCompletionsStream(path, args, options);
+      rememberResolvedMeetingChatPath(path);
+      return {
+        ...result,
+        resolvedPath: path,
+        elapsedMs: Date.now() - startedAt,
+        streamed: true
+      };
+    } catch (error) {
+      lastError = error;
+      if (!shouldFallbackToResponses(error)) {
+        throw error;
+      }
+    }
+  }
+
+  const fallback = await callOpenClawMeetingChat(args);
+  if (options.onPartialText) {
+    await options.onPartialText(fallback.text);
+  }
+  return {
+    ...fallback,
+    elapsedMs: fallback.elapsedMs ?? Date.now() - startedAt
+  };
+}
 export async function startMeetingTask(args: StartMeetingTaskArgs): Promise<MeetingTask> {
   const locale = args.locale ?? DEFAULT_LOCALE;
   const copy = OPENCLAW_COPY[locale];

@@ -12,10 +12,12 @@ import type {
   ChatHistoryItem,
   MeetingAction,
   MeetingMinutes,
-  MeetingRoundResearch,
   MeetingResponseMode,
   MeetingRoundRequest,
+  MeetingRoundResearch,
   MeetingRoundResponse,
+  MeetingRoundStreamEvent,
+  MeetingSpeedMode,
   MeetingTurn,
   PortfolioSnapshot
 } from "@/lib/meeting/types";
@@ -31,6 +33,7 @@ type NormalizedActionItem = {
 };
 
 type DraftTurn = {
+  id: string;
   agentId: AgentId;
   phase: MeetingTurn["phase"];
   rawText: string;
@@ -39,16 +42,22 @@ type DraftTurn = {
   provider: MeetingTurn["provider"];
 };
 
+type RunMeetingRoundOptions = {
+  onEvent?: (event: MeetingRoundStreamEvent) => void | Promise<void>;
+};
+
 const URL_PATTERN = /https?:\/\/[^\s)]+/i;
 const ANALYST_LEAD_PATTERN =
-  /(btc|bitcoin|eth|crypto|kospi|kosdaq|nasdaq|s&p|qqq|aapl|nvda|tsla|stock|chart|price|valuation|multiple|earnings|risk|volatility|macro|etf|실적|리스크|변동성|지표|차트|시세|밸류|주가|공시|뉴스)/i;
+  /(btc|bitcoin|eth|crypto|kospi|kosdaq|nasdaq|s&p|qqq|aapl|nvda|tsla|stock|chart|price|valuation|multiple|earnings|risk|volatility|macro|etf|실적|리스크|변동성|지수|차트|시세|밸류|주가|공시|뉴스)/i;
 const ASSISTANT_LEAD_PATTERN =
-  /(summary|summarize|decision|plan|action|what should|next step|recommend|buy or sell|요약|정리|결론|계획|액션|다음 단계|어떻게 할까|추천|사야|말아야)/i;
+  /(summary|summarize|decision|plan|action|what should|next step|recommend|buy or sell|요약|정리|결론|계획|액션|다음 단계|어떻게 할까|추천|사야|팔아)/i;
 const RESEARCH_TRIGGER_PATTERN =
-  /(browse|browser|openclaw|web|internet|search|look up|find|research|latest|news|filing|verify|source|url|link|기사|최신|출처|검증|링크|뉴스|웹|브라우저|조사)/i;
+  /(browse|browser|openclaw|web|internet|search|look up|find|research|latest|news|filing|verify|source|url|link|기사|최신|출처|검증|링크|웹|브라우저|조사)/i;
 const RESEARCH_FOLLOWUP_PATTERN =
-  /(openclaw|browser follow-up|external verification|source verification|follow-up research|추가 조사 필요|추가 검증 필요|출처 확인 필요|링크 확인 필요|OpenClaw 후속)/i;
+  /(openclaw|browser follow-up|external verification|source verification|follow-up research|추가 조사 필요|추가 검증 필요|출처 확인 필요|링크 확인 필요|OpenClaw 연결)/i;
 const HEADING_PATTERN = /^#{1,6}\s*/;
+const FAST_MODE_MAX_TOKENS = 170;
+const BALANCED_MODE_MAX_TOKENS = 240;
 
 function trimText(value: string, maxLength = 260) {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
@@ -59,12 +68,7 @@ function otherAgent(agentId: AgentId): AgentId {
 }
 
 function normalizeHeading(value: string) {
-  return value
-    .replace(/^#+\s*/, "")
-    .replace(/^[-*]\s*/, "")
-    .replace(/\*\*/g, "")
-    .replace(/:$/, "")
-    .trim();
+  return value.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").replace(/\*\*/g, "").replace(/:$/, "").trim();
 }
 
 function parseSections(text: string, sectionNames: string[]) {
@@ -78,7 +82,7 @@ function parseSections(text: string, sectionNames: string[]) {
     }
 
     const heading = normalizeHeading(line);
-    const matched = sectionNames.find((sectionName) => sectionName === heading);
+    const matched = sectionNames.find((sectionName) => normalizeHeading(sectionName) === heading);
     if (matched) {
       currentSection = matched;
       continue;
@@ -163,14 +167,15 @@ function firstSectionText(sections: ParsedSections, sectionName: string) {
 function renderHistory(
   history: ChatHistoryItem[],
   locale: AppLocale,
-  agentsById: Record<AgentId, Agent>
+  agentsById: Record<AgentId, Agent>,
+  limit = 2
 ) {
   if (history.length === 0) {
     return locale === "ko" ? "이전 대화 기록이 없습니다." : "There is no prior meeting history.";
   }
 
   return history
-    .slice(-4)
+    .slice(-limit)
     .map((item) => {
       const speaker =
         item.role === "user"
@@ -178,89 +183,58 @@ function renderHistory(
             ? "사용자"
             : "User"
           : agentsById[item.agent ?? "assistant"]?.name || (locale === "ko" ? "에이전트" : "Agent");
-      return `- ${speaker}: ${item.content}`;
+      return `- ${speaker}: ${trimText(item.content.replace(/\s+/g, " ").trim(), 180)}`;
     })
     .join("\n");
 }
 
 function renderMarketSnapshot(request: MeetingRoundRequest, locale: AppLocale) {
   if (!request.marketSnapshot) {
-    return locale === "ko" ? "시장 스냅샷이 제공되지 않았습니다." : "No market snapshot was provided.";
+    return locale === "ko" ? "시장 스냅샷이 없습니다." : "No market snapshot was provided.";
   }
 
   const snapshot = request.marketSnapshot;
-  const sessionLabel =
-    snapshot.session === "open"
-      ? locale === "ko"
-        ? "개장"
-        : "Open"
-      : snapshot.session === "pre"
-        ? locale === "ko"
-          ? "장전"
-          : "Pre-market"
-        : snapshot.session === "post"
-          ? locale === "ko"
-            ? "시간외"
-            : "After-hours"
-          : snapshot.session === "closed"
-            ? locale === "ko"
-              ? "휴장"
-              : "Closed"
-            : locale === "ko"
-              ? "상시"
-              : "Always on";
-
   const indexLines = snapshot.indices
-    .slice(0, 3)
-    .map(
-      (item) =>
-        `${item.name} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`
-    );
+    .slice(0, 2)
+    .map((item) => `${item.symbol} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`);
   const watchLines = snapshot.watchlist
-    .slice(0, 4)
-    .map(
-      (item) =>
-        `${item.symbol} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`
-    );
+    .slice(0, 2)
+    .map((item) => `${item.symbol} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`);
 
-  if (locale === "ko") {
-    return [
-      `활성 탭: ${snapshot.tab}`,
-      `헤드라인: ${snapshot.headline}`,
-      `데이터 제공자: ${snapshot.provider}`,
-      `데이터 상태: ${snapshot.status} / 장 상태: ${sessionLabel}`,
-      `기준 시각: ${snapshot.updatedAt}`,
-      indexLines.length > 0 ? `지수: ${indexLines.join(", ")}` : "지수: 없음",
-      watchLines.length > 0 ? `관심 종목: ${watchLines.join(", ")}` : "관심 종목: 없음",
-      snapshot.notes.length > 0 ? `메모: ${snapshot.notes.join(" | ")}` : "메모: 없음"
-    ].join("\n");
-  }
-
-  return [
-    `Active tab: ${snapshot.tab}`,
-    `Headline: ${snapshot.headline}`,
-    `Data provider: ${snapshot.provider}`,
-    `Data status: ${snapshot.status} / Market session: ${sessionLabel}`,
-    `Reference time: ${snapshot.updatedAt}`,
-    indexLines.length > 0 ? `Indices: ${indexLines.join(", ")}` : "Indices: none",
-    watchLines.length > 0 ? `Watchlist: ${watchLines.join(", ")}` : "Watchlist: none",
-    snapshot.notes.length > 0 ? `Notes: ${snapshot.notes.join(" | ")}` : "Notes: none"
-  ].join("\n");
+  return locale === "ko"
+    ? [
+        `활성 시장: ${snapshot.tab}`,
+        `헤드라인: ${snapshot.headline}`,
+        `제공자: ${snapshot.provider}`,
+        indexLines.length > 0 ? `지수: ${indexLines.join(", ")}` : null,
+        watchLines.length > 0 ? `관심 종목: ${watchLines.join(", ")}` : null
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : [
+        `Active market: ${snapshot.tab}`,
+        `Headline: ${snapshot.headline}`,
+        `Provider: ${snapshot.provider}`,
+        indexLines.length > 0 ? `Indices: ${indexLines.join(", ")}` : null,
+        watchLines.length > 0 ? `Watchlist: ${watchLines.join(", ")}` : null
+      ]
+        .filter(Boolean)
+        .join("\n");
 }
 
 function renderPortfolio(snapshot?: PortfolioSnapshot | null, locale: AppLocale = DEFAULT_LOCALE) {
   if (!snapshot) {
-    return locale === "ko" ? "포트폴리오 스냅샷이 제공되지 않았습니다." : "No portfolio snapshot was provided.";
+    return locale === "ko" ? "포트폴리오 스냅샷이 없습니다." : "No portfolio snapshot was provided.";
   }
 
   const positions =
     snapshot.positions.length > 0
       ? snapshot.positions
-          .slice(0, 5)
+          .slice(0, 2)
           .map((position) =>
             locale === "ko"
-              ? `${position.symbol} 수량 ${position.quantity}, 평균 ${position.averagePrice.toFixed(0)}, 손익 ${position.unrealizedPnlPercent.toFixed(2)}%`
-              : `${position.symbol} qty ${position.quantity}, avg ${position.averagePrice.toFixed(0)}, PnL ${position.unrealizedPnlPercent.toFixed(2)}%`
+              ? `${position.symbol} ${position.quantity}주 / 손익 ${position.unrealizedPnlPercent.toFixed(2)}%`
+              : `${position.symbol} ${position.quantity} shares / PnL ${position.unrealizedPnlPercent.toFixed(2)}%`
           )
           .join("; ")
       : locale === "ko"
@@ -268,18 +242,8 @@ function renderPortfolio(snapshot?: PortfolioSnapshot | null, locale: AppLocale 
         : "No open positions";
 
   return locale === "ko"
-    ? [
-        `브로커: ${snapshot.broker} (${snapshot.mode})`,
-        `현금: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`,
-        `총자산: ${snapshot.equity.toFixed(0)} ${snapshot.currency}`,
-        `포지션: ${positions}`
-      ].join("\n")
-    : [
-        `Broker: ${snapshot.broker} (${snapshot.mode})`,
-        `Cash: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`,
-        `Equity: ${snapshot.equity.toFixed(0)} ${snapshot.currency}`,
-        `Positions: ${positions}`
-      ].join("\n");
+    ? [`브로커: ${snapshot.broker}`, `현금: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`, `포지션: ${positions}`].join("\n")
+    : [`Broker: ${snapshot.broker}`, `Cash: ${snapshot.cash.toFixed(0)} ${snapshot.currency}`, `Positions: ${positions}`].join("\n");
 }
 
 function renderPriorMinutes(minutes?: MeetingMinutes | null, locale: AppLocale = DEFAULT_LOCALE) {
@@ -288,16 +252,8 @@ function renderPriorMinutes(minutes?: MeetingMinutes | null, locale: AppLocale =
   }
 
   return locale === "ko"
-    ? [
-        `요약: ${minutes.summary}`,
-        `액션 아이템: ${minutes.actionItems.join("; ") || "없음"}`,
-        `매매 메모: ${minutes.tradeNotes.join("; ") || "없음"}`
-      ].join("\n")
-    : [
-        `Summary: ${minutes.summary}`,
-        `Action items: ${minutes.actionItems.join("; ") || "none"}`,
-        `Trade notes: ${minutes.tradeNotes.join("; ") || "none"}`
-      ].join("\n");
+    ? [`요약: ${trimText(minutes.summary, 160)}`, `액션: ${minutes.actionItems[0] ?? "없음"}`].join("\n")
+    : [`Summary: ${trimText(minutes.summary, 160)}`, `Action: ${minutes.actionItems[0] ?? "none"}`].join("\n");
 }
 
 function collectSourceLabels(request: MeetingRoundRequest, locale: AppLocale) {
@@ -322,29 +278,33 @@ function renderSourceHints(request: MeetingRoundRequest, locale: AppLocale) {
 function buildSharedContext(
   request: MeetingRoundRequest,
   locale: AppLocale,
-  agentsById: Record<AgentId, Agent>
+  agentsById: Record<AgentId, Agent>,
+  speedMode: MeetingSpeedMode
 ) {
-  return locale === "ko"
-    ? [
-        "당신은 금융 미팅룸 안에서 사용자와 직접 대화하는 에이전트입니다. 핵심만 짧고 자연스럽게 답하세요.",
-        renderMarketSnapshot(request, locale),
-        renderPortfolio(request.portfolioSnapshot, locale),
-        renderPriorMinutes(request.minutes, locale),
-        "근거 후보:",
-        renderSourceHints(request, locale),
-        "최근 대화:",
-        renderHistory(request.history, locale, agentsById)
-      ].join("\n\n")
+  const isFastMode = speedMode === "fast";
+  const prefix =
+    locale === "ko"
+      ? isFastMode
+        ? "빠른 응답용 금융 컨텍스트입니다. 핵심만 읽고 바로 판단부터 말하세요."
+        : "실시간 금융 회의용 요약 컨텍스트입니다. 핵심만 읽고 짧고 선명하게 답하세요."
+      : isFastMode
+        ? "Fast finance context. Read the essentials and lead with the judgment."
+        : "Compact finance meeting context. Read the essentials and answer briefly.";
+
+  const blocks = isFastMode
+    ? [prefix, renderMarketSnapshot(request, locale), renderPortfolio(request.portfolioSnapshot, locale), renderHistory(request.history, locale, agentsById, 1)]
     : [
-        "You are an agent inside a finance meeting room. Reply naturally and concisely for a live chat.",
+        prefix,
         renderMarketSnapshot(request, locale),
         renderPortfolio(request.portfolioSnapshot, locale),
         renderPriorMinutes(request.minutes, locale),
-        "Candidate evidence sources:",
+        locale === "ko" ? "근거 후보:" : "Candidate evidence:",
         renderSourceHints(request, locale),
-        "Recent conversation:",
-        renderHistory(request.history, locale, agentsById)
-      ].join("\n\n");
+        locale === "ko" ? "최근 대화:" : "Recent conversation:",
+        renderHistory(request.history, locale, agentsById, 2)
+      ];
+
+  return blocks.join("\n\n");
 }
 
 function chooseFirstSpeaker(message: string, mentionedAgentId?: AgentId): AgentId {
@@ -415,20 +375,12 @@ function getPreferredDisplayLines(agentId: AgentId, rawText: string, locale: App
           (parsed[sectionLabels.analyst.risks] ?? [])[0] ?? ""
         ];
 
-  const preferredLines = preferred
-    .flatMap((block) => block.split(/\r?\n/))
-    .map(compactDisplayLine)
-    .filter(Boolean);
-
+  const preferredLines = preferred.flatMap((block) => block.split(/\r?\n/)).map(compactDisplayLine).filter(Boolean);
   if (preferredLines.length > 0) {
     return preferredLines.slice(0, 3);
   }
 
-  return rawText
-    .split(/\r?\n/)
-    .map(compactDisplayLine)
-    .filter(Boolean)
-    .slice(0, 3);
+  return rawText.split(/\r?\n/).map(compactDisplayLine).filter(Boolean).slice(0, 3);
 }
 
 function buildVisibleTurnText(agentId: AgentId, rawText: string, locale: AppLocale) {
@@ -463,36 +415,61 @@ function buildTurnRequest(args: {
   teammateNote?: string;
   researchContext?: string;
   finalize?: boolean;
+  speedMode?: MeetingSpeedMode;
 }) {
-  const { agentId, locale, agentsById, message, teammateNote, researchContext, finalize } = args;
+  const { agentId, locale, agentsById, message, teammateNote, researchContext, finalize, speedMode = "balanced" } = args;
   const counterpartName = agentsById[otherAgent(agentId)].name;
   const sections = getRoleDefinitionForAgent(agentId, locale).outputFormat.sections;
   const sectionBlock = sections.map((section) => `- ${section}`).join("\n");
+  const teammateLabel = locale === "ko" ? `${counterpartName} 메모` : `${counterpartName} note`;
+  const researchLabel = locale === "ko" ? "OpenClaw 조사 결과" : "OpenClaw findings";
+
+  if (speedMode === "fast") {
+    return locale === "ko"
+      ? [
+          `사용자 요청:\n${message}`,
+          teammateNote ? `${teammateLabel}:\n${trimText(teammateNote, 220)}` : null,
+          researchContext ? `${researchLabel}:\n${trimText(researchContext, 220)}` : null,
+          finalize
+            ? "빠른 최종 응답입니다. 제목 없이 2~3문장으로 답하고, 첫 문장에서 결론을 먼저 말하세요."
+            : "빠른 응답 모드입니다. 제목 없이 2~3문장으로 답하고, 첫 문장에서 판단을 먼저 말하세요."
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      : [
+          `User request:\n${message}`,
+          teammateNote ? `${teammateLabel}:\n${trimText(teammateNote, 220)}` : null,
+          researchContext ? `${researchLabel}:\n${trimText(researchContext, 220)}` : null,
+          finalize
+            ? "Fast final reply. No headings. Answer in two or three short sentences and lead with the conclusion."
+            : "Fast reply mode. No headings. Answer in two or three short sentences and lead with the judgment."
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+  }
 
   return locale === "ko"
     ? [
         `사용자 요청:\n${message}`,
-        teammateNote ? `${counterpartName} 메모:\n${teammateNote}` : null,
-        researchContext ? `OpenClaw 조사 결과:\n${researchContext}` : null,
-        "아래 섹션 제목을 정확히 그대로 사용하세요.",
+        teammateNote ? `${teammateLabel}:\n${trimText(teammateNote, 420)}` : null,
+        researchContext ? `${researchLabel}:\n${trimText(researchContext, 420)}` : null,
+        "아래 섹션 제목을 그대로 사용하세요.",
         sectionBlock,
         finalize
-          ? "최종 답변입니다. 각 섹션은 1~2개의 짧은 bullet 또는 문장으로 정리하고 인사말은 쓰지 마세요."
-          : "메인 채팅용 짧은 답변입니다. 각 섹션은 1~2개의 짧은 bullet 또는 문장으로 정리하고 인사말은 쓰지 마세요.",
-        "중복을 피하고 핵심 판단과 근거만 남기세요."
+          ? "최종 응답입니다. 각 섹션은 1문장 또는 1 bullet로만 쓰고, 인사는 넣지 마세요."
+          : "실시간 회의용 답변입니다. 각 섹션은 1문장 또는 1 bullet로만 쓰세요."
       ]
         .filter(Boolean)
         .join("\n\n")
     : [
         `User request:\n${message}`,
-        teammateNote ? `${counterpartName} note:\n${teammateNote}` : null,
-        researchContext ? `OpenClaw findings:\n${researchContext}` : null,
+        teammateNote ? `${teammateLabel}:\n${trimText(teammateNote, 420)}` : null,
+        researchContext ? `${researchLabel}:\n${trimText(researchContext, 420)}` : null,
         "Use the exact section titles below.",
         sectionBlock,
         finalize
-          ? "This is the final answer for the main chat. Keep each section to one or two short bullets or sentences, with no greeting."
-          : "Write a concise main-chat reply with one or two short bullets or sentences per section and no greeting.",
-        "Avoid repetition and focus on judgment plus evidence."
+          ? "This is the final reply. Keep each section to one sentence or one bullet with no greeting."
+          : "This is a live meeting reply. Keep each section to one sentence or one bullet."
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -512,10 +489,7 @@ function chooseResearchAgent(
     return mentionedAgentId;
   }
 
-  const latestResearchTurn = [...draftTurns]
-    .reverse()
-    .find((turn) => RESEARCH_TRIGGER_PATTERN.test(turn.rawText));
-
+  const latestResearchTurn = [...draftTurns].reverse().find((turn) => RESEARCH_TRIGGER_PATTERN.test(turn.rawText));
   if (latestResearchTurn) {
     return latestResearchTurn.agentId;
   }
@@ -541,10 +515,7 @@ function detectDirectResearchAction(message: string): MeetingAction[] {
   const normalized = message.replace(/@([^\s@]+)/g, "").replace(/\s+/g, " ").trim();
   const urlMatch = message.match(URL_PATTERN);
   const url = urlMatch?.[0];
-  const hasIntent =
-    Boolean(url) ||
-    RESEARCH_TRIGGER_PATTERN.test(message) ||
-    /최신|뉴스|출처|검증|링크|기사|웹|브라우저|조사/.test(message);
+  const hasIntent = Boolean(url) || RESEARCH_TRIGGER_PATTERN.test(message);
 
   if (!hasIntent || !normalized) {
     return [];
@@ -594,9 +565,7 @@ function buildMinutes(args: {
   const portfolio = args.request.portfolioSnapshot;
   const marketLines = [...(snapshot?.indices ?? []), ...(snapshot?.watchlist ?? [])]
     .slice(0, 4)
-    .map(
-      (item) => `${item.symbol} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`
-    );
+    .map((item) => `${item.symbol} ${item.price.toFixed(item.currency === "KRW" ? 0 : 2)} (${item.changePercent.toFixed(2)}%)`);
 
   const tradeNotes = portfolio
     ? portfolio.positions.length > 0
@@ -605,16 +574,8 @@ function buildMinutes(args: {
             ? `${position.symbol}: ${position.quantity}주, 평균 ${position.averagePrice.toFixed(0)}, 손익 ${position.unrealizedPnlPercent.toFixed(2)}%`
             : `${position.symbol}: ${position.quantity} shares, avg ${position.averagePrice.toFixed(0)}, PnL ${position.unrealizedPnlPercent.toFixed(2)}%`
         )
-      : [
-          locale === "ko"
-            ? "모의 포트폴리오에 현재 열린 포지션이 없습니다."
-            : "There are no open positions in the paper portfolio."
-        ]
-    : [
-        locale === "ko"
-          ? "매매 스냅샷을 불러오지 못했습니다."
-          : "The trading snapshot could not be loaded."
-      ];
+      : [locale === "ko" ? "현재 보유 포지션이 없습니다." : "There are no open positions in the paper portfolio."]
+    : [locale === "ko" ? "매매 스냅샷을 불러오지 못했습니다." : "The trading snapshot could not be loaded."];
 
   if (args.research?.artifacts.notes.length) {
     tradeNotes.unshift(trimText(args.research.artifacts.notes[0], 180));
@@ -640,11 +601,7 @@ function buildMinutes(args: {
     marketSnapshot:
       marketLines.length > 0
         ? marketLines
-        : [
-            locale === "ko"
-              ? "이번 라운드에 저장된 시세가 없습니다."
-              : "No market snapshot was saved in this round."
-          ],
+        : [locale === "ko" ? "이번 라운드에 저장된 시세가 없습니다." : "No market snapshot was saved in this round."],
     keyPoints: [
       trimText(
         firstSectionText(analystSections, sectionLabels.analyst.recommendation) ||
@@ -665,8 +622,18 @@ function buildMinutes(args: {
   };
 }
 
-export async function runMeetingRound(request: MeetingRoundRequest): Promise<MeetingRoundResponse> {
+async function emitRoundEvent(options: RunMeetingRoundOptions, event: MeetingRoundStreamEvent) {
+  await options.onEvent?.(event);
+}
+
+export async function runMeetingRound(
+  request: MeetingRoundRequest,
+  options: RunMeetingRoundOptions = {}
+): Promise<MeetingRoundResponse> {
+  const roundStartedAt = Date.now();
   const locale = request.locale ?? DEFAULT_LOCALE;
+  const speedMode = request.speedMode ?? "balanced";
+  const isFastMode = speedMode === "fast";
   const agentsById = getAgentsById(locale, request.personaOverrides);
   const preferredProvider = pickProvider();
   let activeProvider = preferredProvider;
@@ -675,92 +642,161 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
   const requestedAgents = resolveRequestedAgents(request.message, request.responseMode, mentionedAgentId);
   const firstSpeakerId = requestedAgents[0] ?? chooseFirstSpeaker(request.message, mentionedAgentId);
   const supportSpeakerId = requestedAgents[1];
-  const sharedContext = buildSharedContext(request, locale, agentsById);
-
+  const sharedContext = buildSharedContext(request, locale, agentsById, speedMode);
   const draftTurns: DraftTurn[] = [];
-  const firstPhase = getTurnPhase(firstSpeakerId);
-  const firstSections = getRoleDefinitionForAgent(firstSpeakerId, locale).outputFormat.sections;
-  const firstResult = await callLLM(activeProvider, {
+  let providerMs = 0;
+  let resolvedChatPath: string | undefined;
+
+  await emitRoundEvent(options, {
+    type: "start",
+    ts: isoNow(),
+    firstSpeakerId,
+    responseMode: request.responseMode ?? "auto"
+  });
+
+  const runTurn = async (args: {
+    agentId: AgentId;
+    history: ChatHistoryItem[];
+    message: string;
+    phase?: MeetingTurn["phase"];
+  }) => {
+    const agentId = args.agentId;
+    const turnId = uid("turn");
+    const phase = args.phase ?? getTurnPhase(agentId);
+    const sections = isFastMode ? undefined : getRoleDefinitionForAgent(agentId, locale).outputFormat.sections;
+
+    await emitRoundEvent(options, {
+      type: "turn_start",
+      ts: isoNow(),
+      turnId,
+      agentId,
+      phase,
+      speakerLabel: agentsById[agentId].name,
+      provider: activeProvider
+    });
+
+    const result = await callLLM(activeProvider, {
+      agentId,
+      phase,
+      agentSystemPrompt: `${agentsById[agentId].systemPrompt}\n\n${sharedContext}`,
+      history: args.history,
+      locale,
+      requiredSections: sections,
+      maxTokens: isFastMode ? FAST_MODE_MAX_TOKENS : BALANCED_MODE_MAX_TOKENS,
+      message: args.message,
+      onPartialText: async (text) => {
+        await emitRoundEvent(options, {
+          type: "turn_partial",
+          ts: isoNow(),
+          turnId,
+          agentId,
+          phase,
+          text,
+          provider: activeProvider
+        });
+      }
+    });
+
+    activeProvider = result.provider;
+    providerMs += result.elapsedMs ?? 0;
+    if (result.resolvedPath) {
+      resolvedChatPath = result.resolvedPath;
+    }
+
+    const draftTurn: DraftTurn = {
+      id: turnId,
+      agentId,
+      phase,
+      rawText: result.text,
+      visibleText: buildVisibleTurnText(agentId, result.text, locale),
+      timestamp: isoNow(),
+      provider: result.provider
+    };
+    draftTurns.push(draftTurn);
+
+    const turn: MeetingTurn = {
+      id: draftTurn.id,
+      agentId: draftTurn.agentId,
+      speakerLabel: agentsById[draftTurn.agentId].name,
+      text: draftTurn.visibleText,
+      timestamp: draftTurn.timestamp,
+      provider: draftTurn.provider,
+      phase: draftTurn.phase
+    };
+
+    await emitRoundEvent(options, {
+      type: "turn_complete",
+      ts: isoNow(),
+      turn
+    });
+
+    return draftTurn;
+  };
+
+  const firstTurn = await runTurn({
     agentId: firstSpeakerId,
-    phase: firstPhase,
-    agentSystemPrompt: `${agentsById[firstSpeakerId].systemPrompt}\n\n${sharedContext}`,
     history: request.history,
-    locale,
-    requiredSections: firstSections,
     message: buildTurnRequest({
       agentId: firstSpeakerId,
       locale,
       agentsById,
-      message: request.message
+      message: request.message,
+      speedMode
     })
   });
 
-  activeProvider = firstResult.provider;
-  draftTurns.push({
-    agentId: firstSpeakerId,
-    phase: firstPhase,
-    rawText: firstResult.text,
-    visibleText: buildVisibleTurnText(firstSpeakerId, firstResult.text, locale),
-    timestamp: isoNow(),
-    provider: firstResult.provider
-  });
-
   if (supportSpeakerId) {
-    const supportHistory = appendHistory(request.history, draftTurns[0]);
-    const supportPhase = getTurnPhase(supportSpeakerId);
-    const supportSections = getRoleDefinitionForAgent(supportSpeakerId, locale).outputFormat.sections;
-    const supportResult = await callLLM(activeProvider, {
+    await runTurn({
       agentId: supportSpeakerId,
-      phase: supportPhase,
-      agentSystemPrompt: `${agentsById[supportSpeakerId].systemPrompt}\n\n${sharedContext}`,
-      history: supportHistory,
-      locale,
-      requiredSections: supportSections,
+      history: appendHistory(request.history, firstTurn),
       message: buildTurnRequest({
         agentId: supportSpeakerId,
         locale,
         agentsById,
         message: request.message,
-        teammateNote: firstResult.text
+        teammateNote: firstTurn.rawText,
+        speedMode
       })
-    });
-
-    activeProvider = supportResult.provider;
-    draftTurns.push({
-      agentId: supportSpeakerId,
-      phase: supportPhase,
-      rawText: supportResult.text,
-      visibleText: buildVisibleTurnText(supportSpeakerId, supportResult.text, locale),
-      timestamp: isoNow(),
-      provider: supportResult.provider
     });
   }
 
   const usedOpenClawProvider = draftTurns.some((turn) => turn.provider === "openclaw");
-  const actions = usedOpenClawProvider ? [] : detectRoundActions(request.message, draftTurns);
+  const actions = usedOpenClawProvider || isFastMode ? [] : detectRoundActions(request.message, draftTurns);
 
   let research: MeetingRoundResearch | undefined;
   let stopReason: MeetingRoundResponse["meta"]["stopReason"] = "conversation_complete";
 
   if (actions[0]) {
+    const researchAction = actions[0];
     const researchAgentId = chooseResearchAgent(request.message, firstSpeakerId, draftTurns, requestedAgents, mentionedAgentId);
+
+    await emitRoundEvent(options, {
+      type: "research_start",
+      ts: isoNow(),
+      agentId: researchAgentId,
+      instruction: researchAction.instruction,
+      url: researchAction.url
+    });
+
     research = await runMeetingResearchTask({
       agentId: researchAgentId,
-      instruction: actions[0].instruction,
-      url: actions[0].url,
+      instruction: researchAction.instruction,
+      url: researchAction.url,
       sessionId,
       locale
     });
 
+    await emitRoundEvent(options, {
+      type: "research_complete",
+      ts: isoNow(),
+      research
+    });
+
     const finalHistory = draftTurns.reduce<ChatHistoryItem[]>(appendHistory, request.history);
-    const finalSections = getRoleDefinitionForAgent(researchAgentId, locale).outputFormat.sections;
-    const finalResult = await callLLM(activeProvider, {
+    await runTurn({
       agentId: researchAgentId,
       phase: "summary",
-      agentSystemPrompt: `${agentsById[researchAgentId].systemPrompt}\n\n${sharedContext}`,
       history: finalHistory,
-      locale,
-      requiredSections: finalSections,
       message: buildTurnRequest({
         agentId: researchAgentId,
         locale,
@@ -768,25 +804,16 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
         message: request.message,
         teammateNote: draftTurns[draftTurns.length - 1]?.rawText,
         researchContext: buildResearchContext(research, locale),
-        finalize: true
+        finalize: true,
+        speedMode
       })
-    });
-
-    activeProvider = finalResult.provider;
-    draftTurns.push({
-      agentId: researchAgentId,
-      phase: "summary",
-      rawText: finalResult.text,
-      visibleText: buildVisibleTurnText(researchAgentId, finalResult.text, locale),
-      timestamp: isoNow(),
-      provider: finalResult.provider
     });
 
     stopReason = research.task.status === "succeeded" ? "research_complete" : "research_failed";
   }
 
   const turns: MeetingTurn[] = draftTurns.map((turn) => ({
-    id: uid("turn"),
+    id: turn.id,
     agentId: turn.agentId,
     speakerLabel: agentsById[turn.agentId].name,
     text: turn.visibleText,
@@ -796,7 +823,8 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
   }));
 
   const finalSpeakerId = draftTurns[draftTurns.length - 1]?.agentId ?? firstSpeakerId;
-  const researchAgentId = research?.task.agentId === "assistant" || research?.task.agentId === "analyst" ? research.task.agentId : undefined;
+  const researchAgentId =
+    research?.task.agentId === "assistant" || research?.task.agentId === "analyst" ? research.task.agentId : undefined;
   const roundProvider = draftTurns[draftTurns.length - 1]?.provider ?? activeProvider;
 
   return {
@@ -815,7 +843,12 @@ export async function runMeetingRound(request: MeetingRoundRequest): Promise<Mee
       usedResearch: Boolean(research),
       researchAgentId,
       researchStatus: research?.task.status,
-      stopReason
+      stopReason,
+      timings: {
+        providerMs,
+        totalMs: Date.now() - roundStartedAt,
+        resolvedChatPath
+      }
     },
     research,
     actions
